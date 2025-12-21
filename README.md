@@ -48,6 +48,7 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
    ## 参考工作流
 
    即代码库中的`WorkFlowExample.json`，打开Comfy-UI，按<kbd>Ctrl</kbd>+<kbd>O</kbd>，选择此图片，即可加载示例工作流。
+   该工作流还使用了[ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts)的节点。
 
    ## 安装方法
 
@@ -58,3 +59,4 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 ![压缩包](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211548632.png)
 
 将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下，重启Comfy-UI即可。
+
