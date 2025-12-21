@@ -1,5 +1,9 @@
 # ComfyUI-LLM_Prompt_Xml_Formatter
 
+[![ComfyUI](https://img.shields.io/badge/ComfyUI-Compatible-green.svg)](https://comfy.org/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![NewBie](https://img.shields.io/badge/NewBie-Compatible-green.svg)](https://huggingface.co/NewBie-AI/NewBie-image-Exp0.1)
+
 使用LLM API自动生成适用于NewBie模型的XML风格提示词，并调整画面风格
 
 ## 节点说明
@@ -48,7 +52,8 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
    ## 参考工作流
 
    即代码库中的`WorkFlowExample.json`，打开Comfy-UI，按<kbd>Ctrl</kbd>+<kbd>O</kbd>，选择此图片，即可加载示例工作流。
-   该工作流还使用了[ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts)的节点。
+   
+   该工作流还使用了[ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts)的节点，和[SADA加速器](https://github.com/liming123332/comfyui-sada-icml)的节点。这些节点都不必须，跳过后工作流仍然可以正常运行。
 
    ## 安装方法
 
@@ -59,4 +64,5 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 ![压缩包](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211548632.png)
 
 将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下，重启Comfy-UI即可。
+
 
