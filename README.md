@@ -128,7 +128,9 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 
 将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下，重启Comfy-UI即可。
 
-  ## 成本提示
+  ## 成本与风险提示
 
 每调用一次LLM Xml Prompt Formatter的成本约为$0.0012（使用`deepseek-chat`模型）。
+
+使用此工作流生成的图片原图中，会包含你的API key信息，敬请留意。
 
