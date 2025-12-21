@@ -106,31 +106,80 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 
    **使用说明：** `style.json`为预设风格提示词集合，你可以通过修改这个文件来添加风格提示词串。
 
+   示例输入：选择`飘渺杰作光影集`，增加`artist`：`daito,kataokasan`
+
+   示例输出：
+
+   ```xml
+   You are the greatest anime artist in the entire universe. Your figures are always clear, especially in facial detail. Your compositions always adhere to the golden ratio. Your perspectives are perfectly chosen. The scenes in your works always fit the setting. Your lighting is particularly atmospheric.Now draw a picture based on the prompts below.You are an assistant designed to generate anime images based on xml format textual prompts.  <Prompt Start>
+   {
+     <character_1>
+     <n>A</n>
+     <gender>1girl</gender>
+     <appearance>loli, blonde_hair:1.2, hair_between_eyes, short_hair, ahoge, twintails, short_tail, sidelocks, low_twintails, hairclip</appearance>
+     <clothing>short_kimono, white_socks, frilled_socks, converse, sash, red_sash, fingerless_gloves, haori, shorts_under_skirt, leg_belt</clothing>
+     <expression>serious, focused</expression>
+     <action>wearing_headset, commanding, pointing_at_hologram</action>
+     <position>left_side</position>
+     </character_1>
+   
+     <character_2>
+     <n>B</n>
+     <gender>1girl</gender>
+     <appearance>white_hair, high_ponytail, sidelocks</appearance>
+     <clothing>white_serafuku, short_sleeves, short_skirt, shirt_tucked_in, knee_pads, elbow_pads, fingerless_gloves, white_legwear, kneehighs, high-top_hiking_sneakers, shorts_under_skirt, tactical_vest, helmet</clothing>
+     <expression>determined, focused</expression>
+     <action>holding_sniper_rifle, aiming, in_combat_stance</action>
+     <position>right_side</position>
+     </character_2>
+   
+     <general_tags>
+     <count>2girls</count>
+     <style>**ultimate masterpiece digital painting**, **ethereal lighting**, **dreamy aesthetic**, **delicate floral details**, **high saturation blue sky**, **expressionist brushwork and high textural detail**, **maximalist detail**, **painterly texture**, oil painting, stunning aesthetic, ultra-detailed cross-hatching, extreme high contrast, dynamic line art</style>
+     <background>sci-fi_command_center, holographic_displays, tactical_map, futuristic_technology</background>
+     <atmosphere>tense, strategic</atmosphere>
+     <lighting>dramatic_lighting, neon_glow</lighting>
+     <quality>very_aesthetic, masterpiece, no_text</quality>
+     <resolution>max_high_resolution</resolution>
+     <artist>kataokasan,daito, pottsness, midori_fufu, kazutake_hazano, sushispin, rella, konya_karasue, void_0, (wanke:0.4), (blackbeat:0.4), (JUEJUE:0.5), (Ebor18:1.2)</artist>
+     <objects>headset, sniper_rifle, tactical_gear, holograms</objects>
+     </general_tags>
+     
+     "caption":In a futuristic sci-fi command center with glowing holographic displays and tactical maps, two girls are shown in different roles. On the left side, a blonde loli girl with short twintails and an ahoge wears a short kimono with a red sash, fingerless gloves, and converse shoes. She's wearing a headset and intensely pointing at holographic projections while commanding a battle. On the right side, a white-haired girl in a white serafuku uniform with tactical vest and helmet holds a sniper rifle in combat stance, wearing knee pads and hiking sneakers. The two scenes are seamlessly blended together with dramatic neon lighting casting blue and orange hues across the high-tech environment.
+   }
+   ```
+   
+   最终生成的图片：
+   
+   ![图片示例](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211656940.png)
+   
    ## 依赖
-
-   `openai`
-
+   
+    [OpenAI Python API library](https://github.com/openai/openai-python)
+   
    ## 参考工作流
-
+   
    即代码库中的`WorkFlowExample.json`，打开Comfy-UI，按<kbd>Ctrl</kbd>+<kbd>O</kbd>，选择此文件，即可加载示例工作流。
    
    该工作流还使用了[ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts)的节点，和[SADA加速器](https://github.com/liming123332/comfyui-sada-icml)的节点。这些节点都不必须，跳过后工作流仍然可以正常运行。
-
    
-
+   
+   
    ## 安装方法
    
    点击本页面中绿色按钮`<>Code`，点击Download ZIP，将会下载一个压缩包。
    
    ![下载按钮](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211546384.png)
 
-![压缩包](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211548632.png)
+   ![压缩包](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211548632.png)
 
-将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下，重启Comfy-UI即可。
+   将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下，重启Comfy-UI即可。
 
   ## 成本与风险提示
 
-每调用一次LLM Xml Prompt Formatter的成本约为$0.0012（使用`deepseek-chat`模型）。
+   每调用一次LLM Xml Prompt Formatter的成本约为$0.0012（使用`deepseek-chat`模型）。
 
-使用此工作流生成的图片原图中，会包含你的API key信息，敬请留意。
+   使用此工作流生成的**图片原图中，会包含你的API key信息**，敬请留意。此问题将在下一版本中解决。
+
+
 
