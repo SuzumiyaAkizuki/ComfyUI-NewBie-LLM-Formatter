@@ -40,9 +40,9 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 
    | 模型名称                    | 平均每次使用成本/美元 | 备注         |
    | --------------------------- | --------------------- | ------------ |
-   | `deepseek-chat`             | 0.00013               |              |
-   | `gemini-3-flash-preview`    | 0.00040               | SFW          |
-   | `grok-4-fast-non-reasoning` | 0.00010               | NSFW效果最好 |
+   | `deepseek-chat`             | 0.0013               |              |
+   | `gemini-3-flash-preview`    | 0.0040               | SFW          |
+   | `grok-4-fast-non-reasoning` | 0.0010               | NSFW效果最好 |
 
    示例输入：
 
@@ -190,6 +190,7 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
    ![压缩包](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211548632.png)
 
    将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下，重启Comfy-UI即可。
+
 
 
 
