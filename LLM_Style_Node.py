@@ -2,41 +2,58 @@ import re
 import os
 import json
 
-# 默认风格库
+class BColors:
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m' # Reset all attributes
+
+
+
+# === 配置 ===
+# 这里定义默认样式，防止配置文件读取失败时报错
 DEFAULT_STYLES = {
-    "Example": {
-        "artist": "ciloranko,ask \\(askzy\\),diyokama,quasarcake,remsrar,modare,liuyunnnn",
-        "style": "**ultimate masterpiece digital painting**, , **ethereal lighting**, **dreamy aesthetic**, **delicate floral details**, **high saturation blue sky**,**expressionist brushwork and high textural detail**,**maximalist detail**, **painterly texture**,oil painting,stunning aesthetic, ultra-detailed cross-hatching, extreme high contrast, dynamic line art"
+    "Empty style": {
+        "artist": " ",
+        "style": " "
     }
 }
+
+CONFIG_FILENAME = "LPF_config.json"
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
+
+
+def load_styles_from_config():
+    """
+    辅助函数：读取 LPF_config.json 中的 'styles' 字段并将其与默认样式合并。
+    """
+    styles = DEFAULT_STYLES.copy()
+
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+
+                user_styles = data.get("styles", {})
+
+                if isinstance(user_styles, dict) and user_styles:
+                    styles.update(user_styles)
+
+        except Exception as e:
+            print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: Error loading {CONFIG_FILENAME}: {e} {BColors.ENDC}")
+
+    return styles
 
 
 class LLM_Xml_Style_Injector:
     def __init__(self):
-        self.styles = DEFAULT_STYLES
-        # 加载styles.json
-        self.json_path = os.path.join(os.path.dirname(__file__), "styles.json")
-        if os.path.exists(self.json_path):
-            try:
-                with open(self.json_path, 'r', encoding='utf-8') as f:
-                    file_styles = json.load(f)
-                    self.styles.update(file_styles)
-            except Exception as e:
-                print(f"Failed to load styles.json: {e}")
+        pass
 
     @classmethod
     def INPUT_TYPES(s):
-        style_keys = list(DEFAULT_STYLES.keys())
-        json_path = os.path.join(os.path.dirname(__file__), "styles.json")
-        if os.path.exists(json_path):
-            try:
-                with open(json_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    for k in data.keys():
-                        if k not in style_keys:
-                            style_keys.append(k)
-            except:
-                pass
+        # 重新加载
+        current_styles = load_styles_from_config()
+        style_keys = list(current_styles.keys())
 
         return {
             "required": {
@@ -63,23 +80,17 @@ class LLM_Xml_Style_Injector:
     CATEGORY = "LLM XML Helpers"
 
     def inject_style(self, xml_input, preset, artist_add, style_add):
-        current_styles = self.styles
-        if os.path.exists(self.json_path):
-            try:
-                with open(self.json_path, 'r', encoding='utf-8') as f:
-                    current_styles.update(json.load(f))
-            except:
-                pass
+        current_styles = load_styles_from_config()
 
         selected_data = current_styles.get(preset, {"artist": "", "style": ""})
 
         preset_artist = selected_data.get("artist", "")
         preset_style = selected_data.get("style", "")
 
+
         # 处理 Artist
         parts_artist = [artist_add.strip(), preset_artist]
-        # 过滤掉空字符串，然后用逗号连接
-        target_artist = ", ".join([p for p in parts_artist if p])
+        target_artist = ", ".join([p for p in parts_artist if p])  # 过滤空值并合并
 
         # 处理 Style
         parts_style = [style_add.strip(), preset_style]
@@ -87,44 +98,41 @@ class LLM_Xml_Style_Injector:
 
         output_text = xml_input
 
-
         def upsert_tag(text, tag_name, content, insert_after_tag=None):
             """
             text: 完整的 XML 文本
             tag_name: 比如 "artist" 或 "style"
             content: 要填入的内容
-            insert_after_tag: 如果当前标签不存在，尝试寻找这个标签并插在它后面 (比如 "style")
+            insert_after_tag: 锚点标签
             """
             if not content:
-                # 如果内容是空的，就不折腾了，直接返回
                 return text
 
             tag_pattern = f"(<{tag_name}>)(.*?)(</{tag_name}>)"
 
+            # 签已经存在 -> 替换内容
             if re.search(tag_pattern, text, re.DOTALL | re.IGNORECASE):
-
+                # \1 是 <tag>, \3 是 </tag>，这里直接替换中间内容
                 return re.sub(tag_pattern, f"\\1{content}\\3", text, flags=re.DOTALL | re.IGNORECASE)
 
+            # 标签不存在 -> 插入
             else:
                 new_block = f"<{tag_name}>{content}</{tag_name}>"
 
                 if insert_after_tag:
                     target_pattern = f"(</{insert_after_tag}>)"
                     if re.search(target_pattern, text, re.IGNORECASE):
-                        print(f"ℹ️ Auto-inserting <{tag_name}> after <{insert_after_tag}>")
+                        print(f"[LLM_Prompt_Formatter]: Auto-inserting <{tag_name}> after <{insert_after_tag}>")
                         return re.sub(target_pattern, f"\\1\n{new_block}", text, flags=re.IGNORECASE, count=1)
 
-                # 如果没有依托点，或者依托点也没找到，就插在整个字符串最后
-                print(f"⚠️ Missing tag <{tag_name}>, appending to end.")
+                # 没找到锚点 -> 追加到末尾
+                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: Missing tag <{tag_name}>, appending to end.{BColors.ENDC}")
                 return text + "\n" + new_block
 
-        # 执行 Style
+        # 执行注入
         output_text = upsert_tag(output_text, "style", target_style)
 
-        # 执行 Artist
         output_text = upsert_tag(output_text, "artist", target_artist, insert_after_tag="style")
 
-        # 调试打印
-        print(f"\n--- Style Injected ---\nFinal Artist: {target_artist[:50]}...\nFinal Style: {target_style[:50]}...\n")
 
         return (output_text,)
