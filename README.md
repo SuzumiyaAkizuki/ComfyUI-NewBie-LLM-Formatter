@@ -36,7 +36,7 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
    - `xml_out`：`xml`格式提示词
    - `text_out`：大模型输出的额外解释信息
 
-   **使用说明：** `LPF_config.json` 中的 `system_prompt` 字段为大模型使用的预设提示词，其中内置基本破限命令。以下是推荐的模型：
+   **使用说明：** 使用前，请先在`LPF_config.json`中填写API key、API url和模型名称。`LPF_config.json` 中的 `system_prompt` 字段为大模型使用的预设提示词，其中内置基本破限命令。以下是推荐的模型：
 
    | 模型名称                    | 平均每次使用成本/美元 | 备注         |
    | --------------------------- | --------------------- | ------------ |
@@ -120,7 +120,7 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 
    - `xml_output`：处理后的`xml`格式提示词
 
-   **使用说明：** `LPF_config.json` 中的 `style` 字段为大模型使用的预设提示词，为预设风格提示词集合，你可以通过修改这个文件来添加风格提示词串。
+   **使用说明：** `LPF_config.json` 中的 `style` 字段为为预设风格提示词集合，你可以通过修改这个文件来添加风格提示词串。
 
    示例输入：选择`飘渺杰作光影集`，增加`artist`：`daito,kataokasan`
 
@@ -190,6 +190,7 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
    ![压缩包](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211548632.png)
 
    将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下，重启Comfy-UI即可。
+
 
 
 
