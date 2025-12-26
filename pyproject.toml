@@ -1,7 +1,7 @@
 [project]
 name = "llm_prompt_xml_formatter"
 description = "ComfyUI nodes for automatically generating XML-style prompts compatible with NewBie models using LLM APIs, with style customization and preset management capabilities. (Description by CC)"
-version = "1.0.6"
+version = "1.0.7"
 license = {file = "LICENSE"} 
 # classifiers = [
 #     # For OS-independent nodes (works on all operating systems)
@@ -30,7 +30,7 @@ Documentation = "https://github.com/SuzumiyaAkizuki/ComfyUI-LLM_Prompt_XML_Forma
 [tool.comfy]
 PublisherId = "sakizuki"
 DisplayName = "ComfyUI-LLM_Prompt_XML_Formatter"
-Icon = ""
+Icon = "https://raw.githubusercontent.com/SuzumiyaAkizuki/image/main/202512261303834.png"
 includes = [] 
 # "requires-comfyui" = ">=1.0.0"  # ComfyUI version compatibility
 
