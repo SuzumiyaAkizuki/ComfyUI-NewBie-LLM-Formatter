@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import difflib
 from lxml import etree
 
 
@@ -138,7 +139,7 @@ class LLM_Xml_Style_Injector:
 
             # 6. 生成最终字符串
             modified_xml = etree.tostring(root, encoding='unicode', method='xml', pretty_print=True)
-
+            modified_xml = repair_xml_custom(modified_xml)
             # 如果 Header 为空，只返回 XML；否则拼接
             final_output = f"{header_text}\n{modified_xml}" if header_text else modified_xml
             return (final_output,)
@@ -146,3 +147,68 @@ class LLM_Xml_Style_Injector:
         except Exception as e:
             print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: XML 解析失败: {e}{BColors.ENDC}")
             return (xml_input,)
+
+
+def repair_xml_custom(xml_string):
+    """
+    修复 XML 格式错误，不包含 XML 声明。
+    成功修复时打印差异，修复失败时发出警告并返回原串。
+    """
+    if not xml_string.strip():
+        return xml_string
+
+    # 1. 准备解析器
+    # remove_blank_text 帮助我们在对比时减少空白符干扰
+    strict_parser = etree.XMLParser(remove_blank_text=True)
+    recover_parser = etree.XMLParser(recover=True, remove_blank_text=True)
+
+    try:
+        # 尝试严格解析
+        etree.fromstring(xml_string.encode('utf-8'), parser=strict_parser)
+        print("[LLM_Prompt_Formatter]:已完成xml格式检查，无错误。")
+        return xml_string
+    except etree.XMLSyntaxError:
+        try:
+            # 2. 触发修复逻辑
+            root = etree.fromstring(xml_string.encode('utf-8'), parser=recover_parser)
+            if root is None:
+                raise ValueError("无法解析出任何有效结构")
+
+            # 3. 生成修复后的字符串
+            # xml_declaration=False 剔除 <?xml ... ?>
+            # encoding='unicode' 返回 str 类型而非 bytes
+            repaired_xml = etree.tostring(
+                root,
+                encoding='unicode',
+                pretty_print=True,
+                xml_declaration=False
+            ).strip()
+
+            # 4. 打印修复对比
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:检测到xml格式错误，已自动修复。差异如下：{BColors.ENDC}")
+            diff = difflib.unified_diff(
+                xml_string.splitlines(),
+                repaired_xml.splitlines(),
+                fromfile='Original',
+                tofile='Repaired',
+                lineterm=''
+            )
+
+            # 过滤掉 diff 头部信息，只看改动
+            has_diff = False
+            for line in diff:
+                if line.startswith(('+', '-')) and not line.startswith(('+++', '---')):
+                    print(line)
+                    has_diff = True
+
+            if not has_diff:
+                print("(仅修复了微小的空白符或内部编码格式)")
+
+            print("-" * 30)
+            return repaired_xml
+
+        except Exception as e:
+            # 修复失败
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:XML 损坏严重，无法修复！必要时请停止工作流。\n错误详情: {e}{BColors.ENDC}")
+            print("-" * 30)
+            return xml_string

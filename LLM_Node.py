@@ -1,9 +1,14 @@
+import io
 import os
 import re
 import json
+import base64
 import difflib
 from openai import OpenAI
 from lxml import etree
+import numpy as np
+from PIL import Image
+
 
 class BColors:
     WARNING = '\033[93m'
@@ -50,14 +55,29 @@ class LLM_Prompt_Formatter:
                 "user_text": ("STRING",
                               {"multiline": True, "default": "1girl, holding a sword", "dynamicPrompts": False}),
             },
+            "optional": {
+                "image": ("IMAGE",),
+            }
         }
 
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("xml_out", "text_out")
+    OUTPUT_NODE = True
     FUNCTION = "process_text"
     CATEGORY = "LLM XML Helpers"
 
-    def process_text(self, api_key, api_url, model_name, user_text):
+    def tensor_to_base64(self, image_tensor):
+        """将 ComfyUI 的张量图片转换为 Base64 编码"""
+        # image_tensor shape is [B, H, W, C]
+        i = 255. * image_tensor[0].cpu().numpy()
+        img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
+
+        buffered = io.BytesIO()
+        # 使用 JPEG 压缩以节省 Token
+        img.save(buffered, format="JPEG", quality=85)
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+    def process_text(self, api_key, api_url, model_name, user_text,image=None):
         # 1. 加载配置（优先从 JSON 取，UI 次之）
         config = load_api_config()
         final_key = config.get("api_key") if config.get("api_key") else api_key
@@ -76,14 +96,32 @@ class LLM_Prompt_Formatter:
                 return ("API KEY 缺失！请在 LPF_config.json 中配置", "API KEY Missing")
 
             client = OpenAI(api_key=final_key, base_url=final_url)
+
+            messages_content = [{"type": "text", "text": user_text}]
+
+            if image is not None:
+                print(f"[LLM_Prompt_Formatter]: 检测到图片输入，正在转换...")
+                base64_image = self.tensor_to_base64(image)
+                messages_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                })
             response = client.chat.completions.create(
                 model=model_name,
                 messages=[
                     {"role": "system", "content": system_content},
-                    {"role": "user", "content": user_text}
+                    {"role": "user", "content": messages_content}
                 ],
                 temperature=0.7,
             )
+
+            usage = response.usage
+            prompt_tokens = usage.prompt_tokens
+            completion_tokens = usage.completion_tokens
+            total_tokens = usage.total_tokens
+            token_info = f"Tokens: {prompt_tokens} + {completion_tokens} = {total_tokens}"
+            print(f"[LLM_Prompt_Formatter]: {token_info}")
+
             full_response = response.choices[0].message.content
             # XML 匹配，不成功则触发中英分离
             xml_pattern = r"```xml\s*(.*?)\s*```"

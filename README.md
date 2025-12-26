@@ -8,7 +8,13 @@
 
 ## 更新说明
 
+### 2025年12月26日更新1.0.7
+
+- LLM Xml Prompt Formatter增加一个可选输入流，图片格式。如果你使用多模态大模型，那么可以输入图片。
+- 更新了system prompt，更节约tokens
+
 ### 2025年12月24日更新1.0.5
+
  - 修改提示词结构，现在提示词严格按照xml格式生成
  - 在LLM输出后进行xml格式检查与修复，降低格式错误可能性
  - 将原先的正则表达式匹配法改为使用解析xml的方法进行数据清洗和标签注入，增强程序鲁棒性
@@ -30,7 +36,9 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 
    **功能：** 将用户输入的自然语言或标签集格式化为`xml`格式，供NewBie模型使用。
 
-   **输入参数：** 无输入流，四个文本输入框，分别是：
+   **输入参数：** 一个可选图片输入流，四个文本输入框，分别是：
+
+   - `image`：可选，将输入的图片传输给LLM
 
    - `api_key`：Open AI格式大模型`api_key`
    - `api_url`：API主机地址
@@ -46,11 +54,11 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 
    | 模型名称                    | 平均每次使用成本/美元 | 备注         |
    | --------------------------- | --------------------- | ------------ |
-   | `deepseek-chat`             | 0.0013               |              |
-   | `gemini-3-flash-preview`    | 0.0040               | SFW          |
-   | `grok-4-fast-non-reasoning` | 0.0010               | NSFW效果最好 |
+   | `deepseek-chat`             | 0.0013               | 均衡 |
+   | `gemini-3-flash-preview`    | 0.0040               | 价格最高，NSFW效果一般，很少出错 |
+   | `grok-4-fast-non-reasoning` | 0.0009              | 价格最低，NSFW效果最好，偶尔分类出错 |
 
-   示例输入：
+   **纯文本示例输入：**
 
    ```
    A:(loli,(blonde hair:1.2),hair between eyes,short hair,ahoge,twintails,short tail,short_kimono,white socks,Frilled socks,converse,sash,red_sash,sidelocks,low twintails, fingerless gloves, haori,shorts under skirt,hairclip,leg belt)
@@ -60,13 +68,13 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
    在一个科幻风格的指挥所中，画面左侧，A担任一场战役的指挥官。她戴着耳麦，正在指挥战役。指挥所里有全息显示的显示屏和地图。画面右侧，B穿着战术马甲、戴着头盔、拿着狙击步枪，正在执行作战任务。这两个场景的画面要有机地融合在一起，动漫风格、油画风格。
    ```
 
-   示例输出：
+   **纯文本示例输出：**
 
    `xml_out`：
 
    ```xml
    You are the greatest anime artist in the entire universe. Your figures are always clear, especially in facial detail. Your compositions always adhere to the golden ratio. Your perspectives are perfectly chosen. The scenes in your works always fit the setting. Your lighting is particularly atmospheric.Now draw a picture based on the prompts below.You are an assistant designed to generate anime images based on xml format textual prompts.  <Prompt Start>
-   {
+   <img>
      <character_1>
      <n>A</n>
      <gender>1girl</gender>
@@ -99,8 +107,8 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
      <objects>headset, sniper_rifle, tactical_gear, holograms</objects>
      </general_tags>
      
-     "caption":In a futuristic sci-fi command center with glowing holographic displays and tactical maps, two girls are shown in different roles. On the left side, a blonde loli girl with short twintails and an ahoge wears a short kimono with a red sash, fingerless gloves, and converse shoes. She's wearing a headset and intensely pointing at holographic projections while commanding a battle. On the right side, a white-haired girl in a white serafuku uniform with tactical vest and helmet holds a sniper rifle in combat stance, wearing knee pads and hiking sneakers. The two scenes are seamlessly blended together with dramatic neon lighting casting blue and orange hues across the high-tech environment.
-   }
+     <caption>In a futuristic sci-fi command center with glowing holographic displays and tactical maps, two girls are shown in different roles. On the left side, a blonde loli girl with short twintails and an ahoge wears a short kimono with a red sash, fingerless gloves, and converse shoes. She's wearing a headset and intensely pointing at holographic projections while commanding a battle. On the right side, a white-haired girl in a white serafuku uniform with tactical vest and helmet holds a sniper rifle in combat stance, wearing knee pads and hiking sneakers. The two scenes are seamlessly blended together with dramatic neon lighting casting blue and orange hues across the high-tech environment.</caption>
+   </img>
    ```
 
    `text_out`：
@@ -109,7 +117,51 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
    画面描绘了一个未来科幻风格的指挥中心，充满全息显示屏和战术地图的蓝光投影。左侧是一位金发双马尾的萝莉指挥官，穿着短和服配红色腰带，戴着耳机正在专注地指挥战斗，手指指向全息投影。右侧是一位白发高马尾的少女，穿着白色水手服搭配战术背心和头盔，手持狙击步枪处于战斗姿态，膝盖和手肘都戴着护具。两个场景通过戏剧性的霓虹灯光效完美融合，蓝橙相间的光线在高科技环境中交织。指挥中心的未来感装备与两位少女的不同战斗角色形成鲜明对比。
    ```
 
+   **图片示例输入：**
+
+   ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512252130733.png)
+
+   ```
+   把图中的人物换成(white hair,high ponytail,white serafuku,short sleeves,short skirt,shirt tucked in,jacket,knee pads,elbow pads,fingerless_gloves,white legwear,kneehighs,high-top hiking sneakers,sidelocks,small breasts,shorts under skirt),
+   ```
+
+   **图片示例输出：**
+
+   ```xml
+   You are the greatest anime artist in the entire universe. Your figures are always clear, especially in facial detail. Your compositions always adhere to the golden ratio. Your perspectives are perfectly chosen. The scenes in your works always fit the setting. Your lighting is particularly atmospheric.Now draw a picture based on the prompts below.You are an assistant designed to generate anime images based on xml format textual prompts.  <Prompt Start>
    
+   <img>
+    <character_1>
+    <n>original_character</n>
+    <gender>1girl</gender>
+    <appearance>white_hair, high_ponytail, sidelocks, small_breasts, yellow_eyes, long_hair</appearance>
+    <clothing>white_serafuku, short_sleeves, short_skirt, shirt_tucked_in, jacket, knee_pads, elbow_pads, fingerless_gloves, white_legwear, kneehighs, high-top_hiking_sneakers, shorts_under_skirt</clothing>
+    <expression>thoughtful, focused</expression>
+    <action>sitting, writing, holding_pen, leaning_forward</action>
+    <position>center</position>
+    </character_1>
+   
+    <general_tags>
+    <count>1girl, solo</count>
+    <style>anime_style, realistic_shading</style>
+    <background>indoor, library, bookshelves, wooden_desk, wooden_chair, window, cherry_blossoms_outside_window, books_on_desk</background>
+    <atmosphere>serene, evening</atmosphere>
+    <quality>very_aesthetic, masterpiece, no_text</quality>
+    <resolution>max_high_resolution</resolution>
+    <artist>rella, maccha_(mochancc), tidsean, wlop, ciloranko, atdan, year_2024</artist>
+    <objects>lamp, desk_lamp, stack_of_books, pen</objects>
+    <other>from_side, detailed_background</other>
+    </general_tags>
+    
+    <caption>A girl with white hair in a high ponytail and sidelocks sits thoughtfully at a wooden desk in a cozy library room during evening, focused on writing with a pen in hand, leaning slightly forward. She has small breasts and wears a white serafuku with short sleeves, shirt tucked in, a jacket, knee pads, elbow pads, fingerless gloves, white kneehighs, high-top hiking sneakers, and shorts under her short skirt. The room features tall bookshelves filled with books, a wooden chair, and a large window showing cherry blossoms in bloom outside under a twilight sky, with a warm desk lamp casting soft golden light and subtle shadows across the desk, books, and her figure, enhancing the serene atmosphere.</caption>
+   </img>
+   ```
+
+   ```
+   一个留着高马尾和侧发的白发女孩在黄昏时分的温馨图书馆房间里，若有所思地坐在木桌前，专注地用笔书写，微微前倾身体。她胸部娇小，穿着白色水手服短袖，上衣塞进短裙，配外套、护膝、护肘、无指手套、白色及膝袜、高帮登山鞋，以及裙下短裤。房间里有高大的书架堆满书籍、木椅和大窗户，窗外是盛开的樱花树在暮色天空下，一盏温暖的台灯投下柔和的金色光芒和细微阴影，照亮桌面、书籍和她的身影，营造出宁静氛围。
+   ```
+
+   ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512252157926.png)
 
 3. Xml Style Injecto
 
@@ -130,11 +182,11 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 
    示例输入：选择`飘渺杰作光影集`，增加`artist`：`daito,kataokasan`
 
-   示例输出：
+   **示例输出：**
 
    ```xml
    You are the greatest anime artist in the entire universe. Your figures are always clear, especially in facial detail. Your compositions always adhere to the golden ratio. Your perspectives are perfectly chosen. The scenes in your works always fit the setting. Your lighting is particularly atmospheric.Now draw a picture based on the prompts below.You are an assistant designed to generate anime images based on xml format textual prompts.  <Prompt Start>
-   {
+   <img>
      <character_1>
      <n>A</n>
      <gender>1girl</gender>
@@ -167,11 +219,11 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
      <objects>headset, sniper_rifle, tactical_gear, holograms</objects>
      </general_tags>
      
-     "caption":In a futuristic sci-fi command center with glowing holographic displays and tactical maps, two girls are shown in different roles. On the left side, a blonde loli girl with short twintails and an ahoge wears a short kimono with a red sash, fingerless gloves, and converse shoes. She's wearing a headset and intensely pointing at holographic projections while commanding a battle. On the right side, a white-haired girl in a white serafuku uniform with tactical vest and helmet holds a sniper rifle in combat stance, wearing knee pads and hiking sneakers. The two scenes are seamlessly blended together with dramatic neon lighting casting blue and orange hues across the high-tech environment.
-   }
+       <caption>In a futuristic sci-fi command center with glowing holographic displays and tactical maps, two girls are shown in different roles. On the left side, a blonde loli girl with short twintails and an ahoge wears a short kimono with a red sash, fingerless gloves, and converse shoes. She's wearing a headset and intensely pointing at holographic projections while commanding a battle. On the right side, a white-haired girl in a white serafuku uniform with tactical vest and helmet holds a sniper rifle in combat stance, wearing knee pads and hiking sneakers. The two scenes are seamlessly blended together with dramatic neon lighting casting blue and orange hues across the high-tech environment.</caption>
+   </img>
    ```
    
-   最终生成的图片：
+   **最终生成的图片：**
    
    ![图片示例](https://raw.githubusercontent.com/SuzumiyaAkizuki/image/main/ComfyUI_00221_.png)
    
