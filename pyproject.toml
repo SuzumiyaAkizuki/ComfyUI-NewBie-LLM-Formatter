@@ -1,7 +1,7 @@
 [project]
 name = "llm_prompt_xml_formatter"
-description = "ComfyUI nodes for automatically generating XML-style prompts compatible with NewBie models using LLM APIs, with style customization and preset management capabilities. (Description by CC)"
-version = "1.0.7"
+description = "ComfyUI-LLM_Prompt_Xml_Formatter is a specialized extension designed to leverage Large Language Model (LLM) APIs to automatically generate and format structured XML-style prompts optimized for the NewBie image generation model. The project features two primary nodes: the LLM Xml Prompt Formatter, which transforms natural language descriptions or tag sets into detailed XML blocks and supports multimodal image inputs, and the Xml Style Injector, which allows users to seamlessly swap or overlay specific artistic styles and artist signatures within existing XML prompts. By incorporating automatic XML validation and repair mechanisms, along with a centralized JSON configuration for managing API keys and system presets, this tool ensures high robustness and compatibility across various models such as DeepSeek, Gemini, and Grok.ComfyUI-LLM_Prompt_Xml_Formatter 是一款专为 NewBie 图像生成模型设计的扩展插件，它利用大语言模型（LLM）API 将自然语言或标签集自动转化为结构化的 XML 格式提示词。该项目包含两个核心节点：“LLM Xml Prompt Formatter” 能够将用户输入转化为精细的 XML 提示词，并支持通过多模态模型处理图片输入；“Xml Style Injector” 则方便用户在保留原提示词结构的基础上，快速替换或叠加特定的画风与画师风格。通过内置的 XML 格式自动校验修复功能以及基于 JSON 文件的统一配置管理，该工具在支持 DeepSeek、Gemini 和 Grok 等主流模型的同时，显著提升了生成提示词的稳定性与操作便捷性。"
+version = "1.1.0"
 license = {file = "LICENSE"} 
 # classifiers = [
 #     # For OS-independent nodes (works on all operating systems)

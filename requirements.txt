@@ -1,0 +1,4 @@
+openai
+lxml
+numpy
+Pillow

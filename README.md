@@ -6,7 +6,14 @@
 
 使用LLM API自动生成适用于NewBie模型的XML风格提示词，并调整画面风格
 
+Comfy Registry地址：https://registry.comfy.org/zh/nodes/llm_prompt_xml_formatter
+
 ## 更新说明
+
+### 2026年1月3日更新1.1.0
+
+- 更新更多预设风格提示词组
+- 增添`requirements.txt`文件，可以自动安装依赖
 
 ### 2025年12月26日更新1.0.7
 
@@ -56,7 +63,9 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
    | --------------------------- | --------------------- | ------------ |
    | `deepseek-chat`             | 0.0013               | 均衡 |
    | `gemini-3-flash-preview`    | 0.0040               | 价格最高，NSFW效果一般，很少出错 |
-   | `grok-4-fast-non-reasoning` | 0.0009              | 价格最低，NSFW效果最好，偶尔分类出错 |
+   | `grok-4-fast-non-reasoning` | 0.0009              | 价格最低，NSFW效果最好，可能会分类出错 |
+
+   在[Deepseek开放平台](https://platform.deepseek.com)上，每位用户可以获赠10元的免费额度，大约可以使用1000次。
 
    **纯文本示例输入：**
 
@@ -238,32 +247,31 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
    该工作流还使用了[ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts)的节点。这些节点都不必须，跳过后工作流仍然可以正常运行。
    
    
-   
-  ## 安装和使用方法
+   ## 安装和使用方法
 
-点击Github页面中绿色按钮`<>Code`，点击Download ZIP，将会下载一个压缩包。
+   点击Github页面中绿色按钮`<>Code`，点击Download ZIP，将会下载一个压缩包。
 
    ![下载按钮](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211546384.png)
 
    ![压缩包](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211548632.png)
 
-将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下
+   将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下
 
-![image-20251226145335813](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261453308.png)
+   ![image-20251226145335813](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261453308.png)
 
-进入文件夹，找到`LPF_config.json.example`文件，右键重命名，删掉`.example`后缀
+   进入文件夹，找到`LPF_config.json.example`文件，右键重命名，删掉`.example`后缀
 
-![重命名前](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261454909.png)
+   ![重命名前](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261454909.png)
 
-删完就像这样
+   删完就像这样
 
-![image-20251226145521692](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261455772.png)
+   ![image-20251226145521692](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261455772.png)
 
-使用记事本或文件编辑器打开此文件，在对应的字段中填写你的api_key
+   使用记事本或文件编辑器打开此文件，在对应的字段中填写你的api_key
 
-![填写前后对比](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261457930.png)
+   ![填写前后对比](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261457930.png)
 
-重启Comfy-UI，即可使用。
+   重启Comfy-UI，即可使用。
 
 
 
