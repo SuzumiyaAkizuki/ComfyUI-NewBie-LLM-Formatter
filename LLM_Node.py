@@ -52,6 +52,7 @@ class LLM_Prompt_Formatter:
                 "api_url": ("STRING",
                             {"multiline": False, "default": "https://api.openai.com/v1", "dynamicPrompts": False}),
                 "model_name": model_widget,
+                "thinking": ("BOOLEAN", {"default": False}),
                 "user_text": ("STRING",
                               {"multiline": True, "default": "1girl, holding a sword", "dynamicPrompts": False}),
             },
@@ -76,14 +77,14 @@ class LLM_Prompt_Formatter:
         img.save(buffered, format="JPEG", quality=85)
         return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-    def process_text(self, api_key, api_url, model_name, user_text,image=None):
+    def process_text(self, api_key, api_url, model_name, user_text,thinking,image=None):
         # 加载配置（优先从 JSON 取，UI 次之）
         config = load_api_config()
         final_key = config.get("api_key") if config.get("api_key") else api_key
         final_url = config.get("api_url") if config.get("api_url") else api_url
 
         system_content = config.get("system_prompt", "You are a helpful assistant that provides prompt tags.")
-        gemma_prompt = config.get("gemma_prompt", "You are an assistant designed to generate high-quality anime images with the highest degree of image-text alignment based on xml format textual prompts. <Prompt Start>\n");
+        gemma_prompt = config.get("gemma_prompt", "You are an assistant designed to generate high-quality anime images with the highest degree of image-text alignment based on xml format textual prompts. <Prompt Start>\n")
 
 
         # 调用 OpenAI
@@ -103,6 +104,21 @@ class LLM_Prompt_Formatter:
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
                 })
+
+            if thinking:
+                extra_body = {
+                    "reasoning": {
+                        "enabled": True,
+                        "exclude": False,
+                    }
+                }
+            else:
+                extra_body = {
+                    "reasoning": {
+                        "enabled": False
+                    }
+                }
+
             response = client.chat.completions.create(
                 model=model_name,
                 messages=[
@@ -110,6 +126,7 @@ class LLM_Prompt_Formatter:
                     {"role": "user", "content": messages_content}
                 ],
                 temperature=0.7,
+                extra_body=extra_body,
             )
 
             usage = response.usage
@@ -120,6 +137,9 @@ class LLM_Prompt_Formatter:
             print(f"[LLM_Prompt_Formatter]: {token_info}")
 
             full_response = response.choices[0].message.content
+            if thinking:
+                reasoning=response.choices[0].message.reasoning
+                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:已开启思考模式，以下是思考内容：\n {reasoning} {BColors.ENDC}")
             # XML 匹配，不成功则触发中英分离
             xml_pattern = r"```xml\s*(.*?)\s*```"
             match = re.search(xml_pattern, full_response, re.DOTALL)

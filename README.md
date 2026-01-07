@@ -10,7 +10,15 @@
 
 ## 更新说明
 
-### 2026年1月3日更新1.1.0
+### 2026年01月07日更新1.1.5
+
+- 增加Style Preset Saver节点，现在可以将自定义风格提示词组保存在配置文件中
+- LLM Xml Prompt Formatter 增加一个按钮，可以选择是否开启模型的思考模式。思考内容在控制台输出
+- LLM Xml Prompt Formatter 将会在控制台输出本次请求消耗的 tokens 数量
+- 更新更多预设风格提示词组
+- 更新ReadMe文档，增加大模型评测
+
+### 2026年01月03日更新1.1.0
 
 - 更新更多预设风格提示词组
 - 增添`requirements.txt`文件，可以自动安装依赖
@@ -37,19 +45,20 @@
 
 ## 节点说明
 
-ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
+ComfyUI-NewBie-LLM-Formatter提供三个节点：
 
 1. LLM Xml Prompt Formatter
 
    **功能：** 将用户输入的自然语言或标签集格式化为`xml`格式，供NewBie模型使用。
 
-   **输入参数：** 一个可选图片输入流，四个文本输入框，分别是：
+   **输入参数：** 一个可选图片输入流，四个文本输入框，一个按钮，分别是：
 
    - `image`：可选，将输入的图片传输给LLM
 
    - `api_key`：Open AI格式大模型`api_key`
    - `api_url`：API主机地址
    - `model_name`：模型名称
+   - `thinking`：深度思考模式。显示`true`时，模型将进行深度思考，思考过程将在控制台显示。显示`false`时，模型不进行深度思考。推荐将其设置为`false`。
    - 待转换文本
 
    **输出参数：** 2个文本格式输出流
@@ -59,11 +68,17 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 
    **使用说明：** 使用前，请先在`LPF_config.json`中填写API key、API url和模型名称。`LPF_config.json` 中的 `system_prompt` 字段为大模型使用的预设提示词，其中内置基本破限命令。以下是推荐的模型：
 
-   | 模型名称                    | 平均每次使用成本/美元 | 备注         |
-   | --------------------------- | --------------------- | ------------ |
-   | `deepseek-chat`             | 0.0013               | 均衡 |
-   | `gemini-3-flash-preview`    | 0.0040               | 价格最高，NSFW效果一般，很少出错 |
-   | `grok-4-fast-non-reasoning` | 0.0009              | 价格最低，NSFW效果最好，可能会分类出错 |
+   | 模型名称                    | 平均每次使用成本/美元 | NSFW效果 | 输出质量 | 备注 |
+   | --------------------------- | --------------------- | ------------ | --------------------------- | --------------------------- |
+   | `deepseek/deepseek-v3.2` | 0.0008              | 均衡 | 均衡 | 均衡 |
+   | `google/gemini-3-flash-preview` | 0.0035              | 较差，甚至会拒绝部分SFW请求 | 最好 |  |
+   | `x-ai/grok-4.1-fast` | 0.0007              | 最好 | 较好 |  |
+   | `xiaomi/mimo-v2-flash:free` | 0（免费） | 较好 | 一般 |  |
+   | `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` | 0（免费） | 官方宣称无审查 | 较差 |  |
+
+   > 计价参考平台为[OpenRouter](https://openrouter.ai/)，所有模型均关闭思考模式，评测为个人使用体感，仅供参考。
+   >
+   > 强烈建议在使用时关闭思考模式，这会大大降低耗时、减小 token 消耗（关闭思考模式一次使用大约消耗 3000-4000 tokens ，开启思考模式可能会消耗 5000 甚至 10000 tokens。此外，关闭思考模式有可能还会提升NSFW效果。
 
    在[Deepseek开放平台](https://platform.deepseek.com)上，每位用户可以获赠10元的免费额度，大约可以使用1000次。
 
@@ -172,7 +187,7 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
 
    ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512252157926.png)
 
-3. Xml Style Injecto
+2. Xml Style Injecto
 
    **功能：** 替换`xml`格式提示词中的风格信息
 
@@ -231,22 +246,36 @@ ComfyUI-LLM_Prompt_Xml_Formatter提供两个节点：
        <caption>In a futuristic sci-fi command center with glowing holographic displays and tactical maps, two girls are shown in different roles. On the left side, a blonde loli girl with short twintails and an ahoge wears a short kimono with a red sash, fingerless gloves, and converse shoes. She's wearing a headset and intensely pointing at holographic projections while commanding a battle. On the right side, a white-haired girl in a white serafuku uniform with tactical vest and helmet holds a sniper rifle in combat stance, wearing knee pads and hiking sneakers. The two scenes are seamlessly blended together with dramatic neon lighting casting blue and orange hues across the high-tech environment.</caption>
    </img>
    ```
-   
+
    **最终生成的图片：**
-   
+
    ![图片示例](https://raw.githubusercontent.com/SuzumiyaAkizuki/image/main/ComfyUI_00221_.png)
+
+3. Style Preset Saver
+
+   **功能**：将目前使用的风格提示词组保存在配置文件`LPF_config.json`中。
+
+   **输入参数**：1个文本格式输入流，1个单行文本框，1个按钮
+
+   - `text_input`：文本格式输入流，输入目前使用的提示词，节点将自动解析其中的`<artist>`和`<style>`字段。
+   - `preset_name`：单行文本框，保存预设的名称。如果遇到重名或空名称，节点将放弃保存。
+   - `save_tigger`：按钮，只有显示`Save as Styles`时，才会进行保存。
+
+   **输出参数**：无
+
    
+
    ## 依赖
-   
-    [OpenAI Python API library](https://github.com/openai/openai-python)
-   
+
+   请参考项目中的`requirements.txt`
+
    ## 参考工作流
-   
+
    保存在上面的示例图片中。右键另存为，打开Comfy-UI，按<kbd>Ctrl</kbd>+<kbd>O</kbd>，选择此文件，即可加载示例工作流。
-   
+
    该工作流还使用了[ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts)的节点。这些节点都不必须，跳过后工作流仍然可以正常运行。
-   
-   
+
+
    ## 安装和使用方法
 
    点击Github页面中绿色按钮`<>Code`，点击Download ZIP，将会下载一个压缩包。
