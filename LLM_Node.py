@@ -17,6 +17,7 @@ class BColors:
 
 CONFIG_FILENAME = "LPF_config.json"
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
+read_from_json = False
 
 
 def load_api_config():
@@ -39,22 +40,34 @@ class LLM_Prompt_Formatter:
         model_list = config.get("model_list", [])
         api_key = config.get("api_key")
         api_url = config.get("api_url")
-        if model_list and isinstance(model_list, list) and api_key and isinstance(api_key, str) and api_url and isinstance(api_url, str):
+        default_api_key = "sk-..."
+        default_api_url = "https://xxx.ai/api/v1"
+        default_user_text="1girl, holding a sword"
+        global read_from_json
+        if model_list and isinstance(model_list, list) \
+                and api_key and isinstance(api_key, str) and (not api_key == default_api_key)\
+                and api_url and isinstance(api_url, str) and (not api_url == default_api_url):
+            read_from_json = True
             model_widget = (model_list,)
+            key_default = "已从配置文件中读取api key，在此填写将不生效"
+            url_default = "已从配置文件中读取api url，在此填写将不生效"
         else:
-            model_widget = ("STRING", {"multiline": False, "default": "gpt-4o"})
-            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 读取API失败，请检查配置文件。你可以在节点输入相关信息。请注意，你的APIKEY会在原图中保存。{BColors.ENDC}")
+            read_from_json = False
+            model_widget = ("STRING", {"multiline": False, "default": "deepseek-chat"})
+            key_default = "读取API失败，请在此填写api key"
+            url_default = "读取API失败，请在此填写api url"
+            default_user_text = "1girl, holding a sword\n[警告]：读取API失败，请检查配置文件。你可以在节点输入相关信息。请注意，你的API会在原图中保存，分享原图会导致API泄露。强烈建议使用配置文件，完成配置后按F5刷新页面并重新创建此节点。"
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 读取API失败，请检查配置文件。你可以在节点输入相关信息。请注意，你的API会在原图中保存，分享原图会导致API泄露。强烈建议使用配置文件，完成配置后按F5刷新页面并重新创建此节点。{BColors.ENDC}")
 
 
         return {
             "required": {
-                "api_key": ("STRING", {"multiline": False, "default": "sk-...", "dynamicPrompts": False}),
-                "api_url": ("STRING",
-                            {"multiline": False, "default": "https://api.openai.com/v1", "dynamicPrompts": False}),
+                "api_key": ("STRING", {"multiline": False, "default": key_default, "dynamicPrompts": False}),
+                "api_url": ("STRING", {"multiline": False, "default": url_default, "dynamicPrompts": False}),
                 "model_name": model_widget,
-                "thinking": ("BOOLEAN", {"default": False}),
                 "user_text": ("STRING",
-                              {"multiline": True, "default": "1girl, holding a sword", "dynamicPrompts": False}),
+                              {"multiline": True, "default": default_user_text, "dynamicPrompts": False}),
+                "thinking": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "image": ("IMAGE",),
@@ -80,8 +93,13 @@ class LLM_Prompt_Formatter:
     def process_text(self, api_key, api_url, model_name, user_text,thinking,image=None):
         # 加载配置（优先从 JSON 取，UI 次之）
         config = load_api_config()
-        final_key = config.get("api_key") if config.get("api_key") else api_key
-        final_url = config.get("api_url") if config.get("api_url") else api_url
+        global read_from_json
+        if read_from_json:
+            final_key = config.get("api_key")
+            final_url = config.get("api_url")
+        else:
+            final_key = api_key
+            final_url = api_url
 
         system_content = config.get("system_prompt", "You are a helpful assistant that provides prompt tags.")
         gemma_prompt = config.get("gemma_prompt", "You are an assistant designed to generate high-quality anime images with the highest degree of image-text alignment based on xml format textual prompts. <Prompt Start>\n")
@@ -110,6 +128,7 @@ class LLM_Prompt_Formatter:
                     "reasoning": {
                         "enabled": True,
                         "exclude": False,
+                        "type": "enabled"
                     }
                 }
             else:
@@ -137,12 +156,31 @@ class LLM_Prompt_Formatter:
             print(f"[LLM_Prompt_Formatter]: {token_info}")
 
             full_response = response.choices[0].message.content
-            if thinking:
+            #print(
+               # f"{BColors.WARNING}[LLM_Prompt_Formatter调试输出]:LLM输出：\n {full_response} {BColors.ENDC}")
+
+            think=0
+            if  hasattr(response.choices[0].message, 'reasoning') and response.choices[0].message.reasoning:
                 reasoning=response.choices[0].message.reasoning
-                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:已开启思考模式，以下是思考内容：\n {reasoning} {BColors.ENDC}")
-            # XML 匹配，不成功则触发中英分离
+                think=1
+                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+
+            if  hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
+                reasoning=response.choices[0].message.reasoning_content
+                think=1
+                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+
+            if thinking and not think:
+                print(
+                    f"{BColors.WARNING}[LLM_Prompt_Formatter]:虽然您开启了思考开关，但是未解析到思考内容。{BColors.ENDC}")
+
+            # XML 匹配
             xml_pattern = r"```xml\s*(.*?)\s*```"
             match = re.search(xml_pattern, full_response, re.DOTALL)
+            if not match: # XML 匹配失败，试图匹配纯代码块
+                code_pattern = r"```\s*(.*?)\s*```"
+                match = re.search(code_pattern, full_response, re.DOTALL)
+
 
             if match:
                 xml_content = match.group(1).strip()

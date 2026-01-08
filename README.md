@@ -6,9 +6,16 @@
 
 使用LLM API自动生成适用于NewBie模型的XML风格提示词，并调整画面风格
 
+<details>
 
+<summary>更新说明</summary>
 
 ## 更新说明
+
+### 2026年01月08日更新1.1.6
+
+- Style Preset Saver增加一个输出流，可以预览将要保存的风格提示词组
+- 解决了一部分bug，优化了用户引导
 
 ### 2026年01月07日更新1.1.5
 
@@ -42,6 +49,10 @@
  - 修改了默认system prompt，节约tokens
  - 增添了LLM输出清洗流程，增强程序鲁棒性
 
+</details>
+
+
+
 
 ## 节点说明
 
@@ -56,9 +67,17 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
    - `image`：可选，将输入的图片传输给LLM
 
    - `api_key`：Open AI格式大模型`api_key`
+
    - `api_url`：API主机地址
+
    - `model_name`：模型名称
+
    - `thinking`：深度思考模式。显示`true`时，模型将进行深度思考，思考过程将在控制台显示。显示`false`时，模型不进行深度思考。推荐将其设置为`false`。
+
+     > 目前，仅适配了OpenRouter平台和deepseek平台。部分平台不支持设置此字段，请用模型名称控制。
+     >
+     > 例如，可以使用`deepseek-chat`来使用无思考的deepseek，使用`deepseek-reasoner`来使用有思考的deepseek。
+
    - 待转换文本
 
    **输出参数：** 2个文本格式输出流
