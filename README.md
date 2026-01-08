@@ -7,8 +7,7 @@
 使用LLM API自动生成适用于NewBie模型的XML风格提示词，并调整画面风格
 
 <details>
-
-<summary>更新说明</summary>
+<summary> **更新说明** </summary>
 
 ## 更新说明
 
@@ -97,7 +96,7 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
 
    > 计价参考平台为[OpenRouter](https://openrouter.ai/)，所有模型均关闭思考模式，评测为个人使用体感，仅供参考。
    >
-   > 强烈建议在使用时关闭思考模式，这会大大降低耗时、减小 token 消耗（关闭思考模式一次使用大约消耗 3000-4000 tokens ，开启思考模式可能会消耗 5000 甚至 10000 tokens。此外，关闭思考模式有可能还会提升NSFW效果。
+   > 强烈建议在使用时关闭思考模式，这会大大降低耗时、减小 token 消耗（关闭思考模式一次使用大约消耗 3000-4000 tokens ，开启思考模式可能会消耗 5000 甚至 10000 tokens）。此外，关闭思考模式有可能还会提升NSFW效果。
 
    在[Deepseek开放平台](https://platform.deepseek.com)上，每位用户可以获赠10元的免费额度，大约可以使用1000次。
 
@@ -280,7 +279,9 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
    - `preset_name`：单行文本框，保存预设的名称。如果遇到重名或空名称，节点将放弃保存。
    - `save_tigger`：按钮，只有显示`Save as Styles`时，才会进行保存。
 
-   **输出参数**：无
+   **输出参数**：1个文本格式输出流
+
+   - `extracted_tags`：预览将要保存的风格提示词组列表
 
    
 
@@ -291,7 +292,7 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
    ## 参考工作流
 
    保存在上面的示例图片中。右键另存为，打开Comfy-UI，按<kbd>Ctrl</kbd>+<kbd>O</kbd>，选择此文件，即可加载示例工作流。
-
+   
    该工作流还使用了[ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts)的节点。这些节点都不必须，跳过后工作流仍然可以正常运行。
 
 
