@@ -13,7 +13,7 @@
 
 ### 2026年01月12日更新1.1.7
 
- - 极大提升**「非Gemini官方平台」**Gemini模型的NSFW能力，可以完成一般的NSFW书写。如果仍然不能破甲（多见于G向），可以尝试在敏感提示词中间加入字符以破坏token，例如`blood -> blo···od`。
+ - 极大提升 **「非Gemini官方平台」** Gemini模型的NSFW能力，可以完成一般的NSFW书写。如果仍然不能破甲（多见于G向），可以尝试在敏感提示词中间加入字符以破坏token，例如`blood -> blo···od`。
 
    即使如此，仍然不能绝对成功，如果失败可以多尝试几次，或者删掉部分提示词，比如`loli`。
 
@@ -85,7 +85,7 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
 
    - `thinking`：深度思考模式。显示`true`时，模型将进行深度思考，思考过程将在控制台显示。显示`false`时，模型不进行深度思考。推荐将其设置为`false`。
 
-     > 目前，仅适配了OpenRouter平台和deepseek平台。部分平台不支持设置此字段，请用模型名称控制。
+     > 目前，仅适配了OpenRouter平台、deepseek平台和Gemini平台。部分平台不支持设置此字段，请用模型名称控制。
      >
      > 例如，可以使用`deepseek-chat`来使用无思考的deepseek，使用`deepseek-reasoner`来使用有思考的deepseek。
 
@@ -101,14 +101,14 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
    | 模型名称                    | 平均每次使用成本/美元 | NSFW效果 | 输出质量 | 备注 |
    | --------------------------- | --------------------- | ------------ | --------------------------- | --------------------------- |
    | `deepseek/deepseek-v3.2` | 0.0008              | 均衡 | 均衡 | 均衡 |
-   | `google/gemini-3-flash-preview` | 0.0035              | 较好，部分情况(G向)仍需技巧 | 最好 |  |
-   | `x-ai/grok-4.1-fast` | 0.0007              | 最好 | 较好 |  |
+   | `google/gemini-3-flash-preview` | 0.0035              | 较好，部分情况(G向)仍需技巧，可能需要多试几次 | 最好 | NewBie训练打标使用了此模型 |
+   | `x-ai/grok-4.1-fast` | 0.0007              | 最好 | 较好 | NewBie训练打标使用了此模型 |
    | `xiaomi/mimo-v2-flash:free` | 0（免费） | 较好 | 一般 |  |
    | `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` | 0（免费） | 官方宣称无审查 | 较差 |  |
 
    > 计价参考平台为[OpenRouter](https://openrouter.ai/)，所有模型均关闭思考模式，评测为个人使用体感，仅供参考。
    >
-   > 强烈建议在使用时关闭思考模式，这会大大降低耗时、减小 token 消耗（关闭思考模式一次使用大约消耗 3000-4000 tokens ，开启思考模式可能会消耗 5000 甚至 10000 tokens）。此外，关闭思考模式有可能还会提升NSFW效果。
+   > *开发者笔记：强烈建议在使用时关闭思考模式，这会大大降低耗时、减小 token 消耗（关闭思考模式一次使用大约消耗 3000-4000 tokens ，开启思考模式可能会消耗 5000 甚至 10000 tokens）。此外，关闭思考模式有可能还会提升NSFW效果。*
 
    在[Deepseek开放平台](https://platform.deepseek.com)上，每位用户可以获赠10元的免费额度，大约可以使用1000次。
 
