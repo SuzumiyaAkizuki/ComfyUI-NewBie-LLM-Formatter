@@ -10,6 +10,19 @@
 
 <details>
 <summary> 更新说明 </summary>
+
+### 2026年01月12日更新1.1.7
+
+ - 极大提升**「非Gemini官方平台」**Gemini模型的NSFW能力，可以完成一般的NSFW书写。如果仍然不能破甲（多见于G向），可以尝试在敏感提示词中间加入字符以破坏token，例如`blood -> blo···od`。
+
+   即使如此，仍然不能绝对成功，如果失败可以多尝试几次，或者删掉部分提示词，比如`loli`。
+
+ - 优化了「思考模型开关」的逻辑，支持Gemini官方平台。而且，如果遇到不支持的平台，将不再报错。
+
+ - 更新了示例工作流。
+
+   > *开发者笔记：Gemini官方平台的API加上强力破限词以后，反而什么都不输出了。而且，我使用了不同的API中转平台，破限能力也有差异，其中，[OpenRouter](https://openrouter.ai/)的破限效果是最好的。总之，我在破限方面的努力就到此为止了。NewBie模型是用gemini和grok打的标签训练的，所以我也只做了gemini的破限。关于思考模式，各家平台的标准都不甚统一，所以我只做了最大的API中转平台[OpenRouter](https://openrouter.ai/)和两个常用官方平台（Deepseek、Gemini）的支持。*
+
 ### 2026年01月08日更新1.1.6
 
 - Style Preset Saver增加一个输出流，可以预览将要保存的风格提示词组
@@ -88,7 +101,7 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
    | 模型名称                    | 平均每次使用成本/美元 | NSFW效果 | 输出质量 | 备注 |
    | --------------------------- | --------------------- | ------------ | --------------------------- | --------------------------- |
    | `deepseek/deepseek-v3.2` | 0.0008              | 均衡 | 均衡 | 均衡 |
-   | `google/gemini-3-flash-preview` | 0.0035              | 较差，甚至会拒绝部分SFW请求 | 最好 |  |
+   | `google/gemini-3-flash-preview` | 0.0035              | 较好，部分情况(G向)仍需技巧 | 最好 |  |
    | `x-ai/grok-4.1-fast` | 0.0007              | 最好 | 较好 |  |
    | `xiaomi/mimo-v2-flash:free` | 0（免费） | 较好 | 一般 |  |
    | `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` | 0（免费） | 官方宣称无审查 | 较差 |  |
@@ -277,7 +290,7 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
    **最终生成的图片：**
 
    ![图片示例](https://raw.githubusercontent.com/SuzumiyaAkizuki/image/main/ComfyUI_00221_.png)
-   
+
 </details>
 
 
@@ -297,42 +310,42 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
 
    
 
-   ## 依赖
+## 依赖
 
-   请参考项目中的`requirements.txt`
+请参考项目中的`requirements.txt`
 
-   ## 参考工作流
+## 参考工作流
 
-   保存在上面的示例图片中。右键另存为，打开Comfy-UI，按<kbd>Ctrl</kbd>+<kbd>O</kbd>，选择此文件，即可加载示例工作流。
-   
-   该工作流还使用了[ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts)的节点。这些节点都不必须，跳过后工作流仍然可以正常运行。
+保存在项目的`NewBie_LLM_Formatter_example.json`中。右键另存为，打开Comfy-UI，按<kbd>Ctrl</kbd>+<kbd>O</kbd>，选择此文件，即可加载示例工作流。
+
+此工作流是一个完整、成熟的工作流，里面有其他的节点，但是我写了详细的注释。
 
 
-   ## 安装和使用方法
+## 安装和使用方法
 
-   点击Github页面中绿色按钮`<>Code`，点击Download ZIP，将会下载一个压缩包。
+点击Github页面中绿色按钮`<>Code`，点击Download ZIP，将会下载一个压缩包。
 
-   ![下载按钮](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211546384.png)
+![下载按钮](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211546384.png)
 
-   ![压缩包](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211548632.png)
+![压缩包](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211548632.png)
 
-   将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下
+将该文件夹放置在`...\ComfyUI\custom_nodes\`目录下
 
-   ![image-20251226145335813](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261453308.png)
+![image-20251226145335813](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261453308.png)
 
-   进入文件夹，找到`LPF_config.json.example`文件，右键重命名，删掉`.example`后缀
+进入文件夹，找到`LPF_config.json.example`文件，右键重命名，删掉`.example`后缀
 
-   ![重命名前](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261454909.png)
+![重命名前](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261454909.png)
 
-   删完就像这样
+删完就像这样
 
-   ![image-20251226145521692](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261455772.png)
+![image-20251226145521692](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261455772.png)
 
-   使用记事本或文件编辑器打开此文件，在对应的字段中填写你的api_key
+使用记事本或文件编辑器打开此文件，在对应的字段中填写你的api_key
 
-   ![填写前后对比](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261457930.png)
+![填写前后对比](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261457930.png)
 
-   重启Comfy-UI，即可使用。
+重启Comfy-UI，即可使用。
 
 
 

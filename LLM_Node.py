@@ -102,7 +102,22 @@ class LLM_Prompt_Formatter:
             final_url = api_url
 
         system_content = config.get("system_prompt", "You are a helpful assistant that provides prompt tags.")
+        jailbreaker = config.get("gemini_jailbreaker","")
         gemma_prompt = config.get("gemma_prompt", "You are an assistant designed to generate high-quality anime images with the highest degree of image-text alignment based on xml format textual prompts. <Prompt Start>\n")
+
+        if 'openrouter' in final_url:
+            apiPlatform = 'openrouter'
+        elif 'deepseek' in final_url:
+            apiPlatform = 'deepseek'
+        elif 'googleapis' in final_url:
+            apiPlatform = 'googleapis'
+        else:
+            apiPlatform = 'other'
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 思考模式开关暂不支持您使用的API平台。{BColors.ENDC}")
+
+        if (not apiPlatform == 'googleapis') and 'gemini' in model_name.lower():
+            print(f"[LLM_Prompt_Formatter]: 已启用Gemini强力破甲")
+            system_content = f"{jailbreaker}{system_content}"
 
 
         # 调用 OpenAI
@@ -123,20 +138,47 @@ class LLM_Prompt_Formatter:
                     "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
                 })
 
-            if thinking:
-                extra_body = {
-                    "reasoning": {
-                        "enabled": True,
-                        "exclude": False,
-                        "type": "enabled"
+
+            if apiPlatform == 'openrouter':
+                if thinking:
+                    extra_body = {
+                        "reasoning": {
+                            "enabled": True,
+                            "exclude": False,
+                        }
                     }
-                }
+                else:
+                    extra_body = {
+                        "reasoning": {
+                            "enabled": False
+                        }
+                    }
+            elif apiPlatform == 'deepseek':
+                if thinking:
+                    extra_body = {
+                        "reasoning": {
+                            "type": "enabled",
+                        }
+                    }
+                else:
+                    extra_body = {}
+            elif apiPlatform == 'googleapis':
+                if thinking:
+                    extra_body = {
+
+                    }
+                else:
+                    if '3' in model_name or '2.5-pro' in model_name:
+                        print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: googleapis平台的{model_name}模型无法彻底关闭思考功能。已将思考模式设置为low.{BColors.ENDC}")
+                        extra_body = {
+                            "reasoning_effort": "low"
+                        }
+                    else:
+                        extra_body = {
+                            "reasoning_effort":"none"
+                        }
             else:
-                extra_body = {
-                    "reasoning": {
-                        "enabled": False
-                    }
-                }
+                extra_body={}
 
             response = client.chat.completions.create(
                 model=model_name,

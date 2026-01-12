@@ -1,7 +1,7 @@
 [project]
 name = "NewBie-LLM-Formatter"
 description = "This extension automates the creation of structured XML prompts for the NewBie model by using LLM APIs to transform natural language or images into formatted descriptions. It provides specialized nodes for high-robustness prompt generation and seamless artistic style injection to enhance image generation workflows.该插件利用大语言模型 API 将自然语言或图片自动转化为适用于 NewBie 模型的结构化 XML 提示词。通过提供高度健壮的提示词生成与画面风格注入节点，它显著提升了图像生成流程的效率与效果。"
-version = "1.1.6"
+version = "1.1.7"
 license = {file = "LICENSE"} 
 # classifiers = [
 #     # For OS-independent nodes (works on all operating systems)
