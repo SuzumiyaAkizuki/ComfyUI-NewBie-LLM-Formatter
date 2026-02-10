@@ -4,6 +4,8 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![NewBie](https://img.shields.io/badge/NewBie-Compatible-yellow.svg)](https://huggingface.co/NewBie-AI/NewBie-image-Exp0.1)
 
+![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202602100940021.png)
+
 利用大语言模型 API 将自然语言或图片自动转化为适用于 NewBie 模型的结构化 XML 提示词。通过提供高度健壮的提示词生成与画面风格管理节点，显著提升了图像生成流程的效率与效果。
 
 项目Github地址：https://github.com/SuzumiyaAkizuki/ComfyUI-NewBie-LLM-Formatter
@@ -14,6 +16,9 @@
 
 <details open>
 <summary> 更新说明 </summary>
+### 2026年02月10日更新ComfyUI-DanbooruSearcher
+
+- 我创建了一个新的项目，叫[ComfyUI-DanbooruSearcher](https://github.com/SuzumiyaAkizuki/ComfyUI-DanbooruSearcher)，是模糊搜索D站标签用的。或许，结合这个节点，可以提升本节点的输出质量。
 
 ### 2026年02月06日更新1.2.0
 
