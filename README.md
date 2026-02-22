@@ -17,6 +17,10 @@
 <details open>
 <summary> 更新说明 </summary>
 
+### 2026年02月22日更新1.2.1
+
+- 修复了system prompt中的问题，添加了一些预设风格串
+
 ### 2026年02月10日更新ComfyUI-DanbooruSearcher
 
 - 我创建了一个新的项目，叫[ComfyUI-DanbooruSearcher](https://github.com/SuzumiyaAkizuki/ComfyUI-DanbooruSearcher)，是模糊搜索D站标签用的。或许，结合这个节点，可以提升本节点的输出质量。

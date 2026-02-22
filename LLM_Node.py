@@ -209,6 +209,7 @@ class LLM_Prompt_Formatter:
             print(f"[LLM_Prompt_Formatter]: {token_info}")
 
             full_response = response.choices[0].message.content
+            reasoning = ""
             #print(
                # f"{BColors.WARNING}[LLM_Prompt_Formatter调试输出]:LLM输出：\n {full_response} {BColors.ENDC}")
 
@@ -226,13 +227,19 @@ class LLM_Prompt_Formatter:
             match = re.search(r'<think>(.*?)</think>', full_response, re.DOTALL)
             if match:
                 found_thinking=True
-                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {match.group(1)} {BColors.ENDC}")
+                reasoning=match.group(1)
+                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
                 full_response = re.sub(r'<think>(.*?)</think>', "", full_response, flags=re.DOTALL)
                 full_response = full_response.strip()
 
             if thinking and not found_thinking:
                 print(
                     f"{BColors.WARNING}[LLM_Prompt_Formatter]:虽然您开启了思考开关，但是未解析到思考内容。{BColors.ENDC}")
+
+            if (not full_response) and reasoning:
+                print(
+                    f"{BColors.WARNING}[LLM_Prompt_Formatter]:模型未返回结果但检测到思考内容，以思考内容作为结果。{BColors.ENDC}")
+                full_response = reasoning
 
             # # XML 匹配
             match = re.search(r"```(?:xml)?\s*(.*?)\s*```", full_response, re.DOTALL)
