@@ -17,6 +17,10 @@
 <details open>
 <summary> 更新说明 </summary>
 
+### 2026年02月25日更新1.2.2
+
+- 更新了很多预设风格串。可以在[这个链接](https://docs.qq.com/sheet/DTUNCQW5TWFBMVGhY?tab=BB08J2)查看本插件自带的预设风格串例图。
+
 ### 2026年02月22日更新1.2.1
 
 - 修复了system prompt中的问题，添加了一些预设风格串
