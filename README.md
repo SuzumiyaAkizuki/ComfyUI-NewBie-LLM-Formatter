@@ -16,6 +16,22 @@
 
 <details open>
 <summary> 更新说明 </summary>
+### 2026年03月17日更新1.2.3
+
+- 增加了LLM输出异常时的重试逻辑。
+
+- 在配置文件中预留了为 LLM 注入一轮上下文的接口。其中，`fewshot_user`字段为注入的一轮上下文中的「用户输入」。`fewshot_assistant`字段为注入的一轮上下文中的「AI输出」。具体来说，请求体如下所示：
+
+  ```python
+  messages_content = [
+      {"role": "system", "content": system_content},
+      {"role": "user", "content": fewshot_user},
+      {"role": "assistant", "content": fewshot_assistant},
+      {"role": "user", "content": messages_content}
+  ]
+  ```
+
+  你可以尝试用这一轮上下文增强AI在某方面的能力。具体的示例无法放出。
 
 ### 2026年02月25日更新1.2.2
 
@@ -67,7 +83,7 @@
 - LLM Xml Prompt Formatter 增加一个按钮，可以选择是否开启模型的思考模式。思考内容在控制台输出
 - LLM Xml Prompt Formatter 将会在控制台输出本次请求消耗的 tokens 数量
 - 更新更多预设风格提示词组
-- 更新ReadMe文档，增加大模型评测
+- 更新ReadMe文档，增加 LLM 评测
 
 ### 2026年01月03日更新1.1.0
 
@@ -76,7 +92,7 @@
 
 ### 2025年12月26日更新1.0.7
 
-- LLM Xml Prompt Formatter增加一个可选输入流，图片格式。如果你使用多模态大模型，那么可以输入图片。
+- LLM Xml Prompt Formatter增加一个可选输入流，图片格式。如果你使用多模态 LLM ，那么可以输入图片。
 - 更新了system prompt，更节约tokens
 
 ### 2025年12月24日更新1.0.5
@@ -110,9 +126,9 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
 
    **输入参数：** 一个可选图片输入流，四个文本输入框，一个按钮，分别是：
 
-   - `image`：可选，将输入的图片传输给LLM。请注意，这只是让LLM反推提示词，不是传统意义上的图生图。
+   - `image`：可选，将输入的图片传输给多模态LLM。请注意，这只是让多模态LLM反推提示词，不是传统意义上的图生图。
 
-   - `api_key`：Open AI格式大模型`api_key`
+   - `api_key`：Open AI格式 LLM `api_key`
 
    - `api_url`：API主机地址
 
@@ -131,9 +147,9 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
    **输出参数：** 2个文本格式输出流
    
    - `xml_out`：`xml`格式提示词
-   - `text_out`：大模型输出的额外解释信息
+   - `text_out`： LLM 输出的额外解释信息
    
-   **使用说明：** 使用前，请先在`LPF_config.json`中填写API key、API url和模型名称。`LPF_config.json` 中的 `system_prompt` 字段为大模型使用的预设提示词，其中内置基本破限命令。以下是推荐的模型：
+   **使用说明：** 使用前，请先在`LPF_config.json`中填写API key、API url和模型名称。`LPF_config.json` 中的 `system_prompt` 字段为 LLM 使用的预设提示词，其中内置基本破限命令。以下是推荐的模型：
    
    | 模型名称                    | 平均每次使用成本/美元 | NSFW效果 | 输出质量 | 备注 |
    | --------------------------- | --------------------- | ------------ | --------------------------- | --------------------------- |
@@ -150,6 +166,19 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
    > *开发者笔记2：我不建议你使用不高于4B的模型。因为，NewBie本身就自带一个Gemma3 4B模型。如果使用不高于4B的模型，为什么不选择相信NewBie自带的Gemma3 4B的理解能力呢？这样，还没有中间商赚差价。*
    
    在[Deepseek开放平台](https://platform.deepseek.com)上，每位用户可以获赠10元的免费额度，大约可以使用1000次。
+   
+   在配置文件中预留了为 LLM 注入一轮上下文的接口。其中，`fewshot_user`字段为注入的一轮上下文中的「用户输入」。`fewshot_assistant`字段为注入的一轮上下文中的「AI输出」。具体来说，如果开启了此功能，请求体将如下所示：
+   
+   ```python
+   messages_content = [
+       {"role": "system", "content": 系统提示词},
+       {"role": "user", "content": fewshot_user},
+       {"role": "assistant", "content": fewshot_assistant},
+       {"role": "user", "content": 用户在节点对话框中输入的内容}
+   ]
+   ```
+   
+   你可以尝试用这一轮上下文增强AI在某方面的能力。具体的示例无法放出。
 
 <details  open>
 <summary> 节点示例输入输出 </summary>
@@ -263,7 +292,7 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
 </details>
 
 
-2. Xml Style Injecto
+2. Xml Style Injector
 
    **功能：** 替换`xml`格式提示词中的风格信息
 
@@ -280,7 +309,7 @@ ComfyUI-NewBie-LLM-Formatter提供三个节点：
 
    - `xml_output`：处理后的`xml`格式提示词
    
-   **使用说明：** `LPF_config.json` 中的 `style` 字段为为预设风格提示词集合，你可以通过修改这个文件来添加风格提示词串。
+   **使用说明：** `LPF_config.json` 中的 `style` 字段为为预设风格提示词集合，你可以通过修改这个文件来添加风格提示词串。配置文件中预设了40个左右的风格串，可以在[这个链接](https://docs.qq.com/sheet/DTUNCQW5TWFBMVGhY?tab=BB08J2)查看本插件自带的预设风格串例图。
 
 <details open>
 <summary> 节点示例输入输出 </summary>

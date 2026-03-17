@@ -164,9 +164,11 @@ class LLM_Prompt_Formatter:
 
         system_content = config.get("system_prompt", "You are a helpful assistant that provides prompt tags.")
         jailbreaker = config.get("gemini_jailbreaker","")
+        fewshot_user = config.get("fewshot_user","")
+        fewshot_assistant = config.get("fewshot_assistant","")
         gemma_prompt = config.get("gemma_prompt", "You are an assistant designed to generate high-quality anime images with the highest degree of image-text alignment based on xml format textual prompts. <Prompt Start>\n")
 
-        if (not 'googleapis' in api_url) and ('gemini' in model_name.lower()):
+        if (not 'googleapis' in api_url) and ('gemini' in model_name.lower()) and jailbreaker :
             print(f"[LLM_Prompt_Formatter]: 已启用Gemini强力破甲。")
             system_content = f"{jailbreaker}{system_content}"
 
@@ -188,87 +190,128 @@ class LLM_Prompt_Formatter:
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
                 })
-
-            extra_body = self.get_platform_settings(final_url,model_name,thinking)
-
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
+            extra_body = self.get_platform_settings(final_url, model_name, thinking)
+            max_retries = 3
+            # range(max_retries + 1) 即为：1次正常请求 + 最多3次重试
+            if fewshot_assistant and fewshot_user:
+                messages_content = [
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": fewshot_user},
+                    {"role": "assistant", "content": fewshot_assistant},
+                    {"role": "user", "content": messages_content}
+                ]
+                print("[LLM_Prompt_Formatter]: 已成功应用用户few-shot设置。\n")
+            else :
+                messages_content = [
                     {"role": "system", "content": system_content},
                     {"role": "user", "content": messages_content}
-                ],
-                temperature=0.7,
-                extra_body=extra_body,
-            )
+                ]
+            for attempt in range(max_retries + 1):
+                try:
 
-            usage = response.usage
-            prompt_tokens = usage.prompt_tokens
-            completion_tokens = usage.completion_tokens
-            total_tokens = usage.total_tokens
-            token_info = f"Tokens: {prompt_tokens} tokens input + {completion_tokens} tokens output = {total_tokens} tokens used."
-            print(f"[LLM_Prompt_Formatter]: {token_info}")
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=messages_content,
+                        temperature=0.7,
+                        extra_body=extra_body,
+                    )
+                    usage = response.usage
+                    prompt_tokens = usage.prompt_tokens
+                    completion_tokens = usage.completion_tokens
+                    total_tokens = usage.total_tokens
+                    token_info = f"Tokens: {prompt_tokens} tokens input + {completion_tokens} tokens output = {total_tokens} tokens used."
+                    print(f"[LLM_Prompt_Formatter]: {token_info}")
+                    full_response = response.choices[0].message.content
 
-            full_response = response.choices[0].message.content
-            reasoning = ""
-            #print(
-               # f"{BColors.WARNING}[LLM_Prompt_Formatter调试输出]:LLM输出：\n {full_response} {BColors.ENDC}")
 
-            found_thinking=False
-            if  hasattr(response.choices[0].message, 'reasoning') and response.choices[0].message.reasoning:
-                reasoning=response.choices[0].message.reasoning
-                found_thinking=True
-                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+                    reasoning_present = False
+                    if hasattr(response.choices[0].message, 'reasoning') and response.choices[0].message.reasoning:
+                        reasoning_present = True
+                    if hasattr(response.choices[0].message, 'reasoning_content') and response.choices[
+                        0].message.reasoning_content:
+                        reasoning_present = True
+                    # 拦截 NoneType，若内容为空且没有深度思考则抛错重试
+                    if full_response is None:
+                        if not reasoning_present:
+                            raise ValueError("LLM API 返回了 NoneType (返回内容为空)。")
+                        # 如果有思考内容仅仅是正文为空，给个空字符串，防止后面的正则匹配(re.search)直接崩溃
+                        full_response = ""
+                    reasoning = ""
+                    # print(
+                    # f"{BColors.WARNING}[LLM_Prompt_Formatter调试输出]:LLM输出：\n {full_response} {BColors.ENDC}")
+                    found_thinking = False
+                    if hasattr(response.choices[0].message, 'reasoning') and response.choices[0].message.reasoning:
+                        reasoning = response.choices[0].message.reasoning
+                        found_thinking = True
+                        print(
+                            f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+                    if hasattr(response.choices[0].message, 'reasoning_content') and response.choices[
+                        0].message.reasoning_content:
+                        reasoning = response.choices[0].message.reasoning_content
+                        found_thinking = True
+                        print(
+                            f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+                    match = re.search(r'<think>(.*?)</think>', full_response, re.DOTALL)
+                    if match:
+                        found_thinking = True
+                        reasoning = match.group(1)
+                        print(
+                            f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+                        full_response = re.sub(r'<think>(.*?)</think>', "", full_response, flags=re.DOTALL)
+                        full_response = full_response.strip()
+                    if thinking and not found_thinking:
+                        print(
+                            f"{BColors.WARNING}[LLM_Prompt_Formatter]:虽然您开启了思考开关，但是未解析到思考内容。{BColors.ENDC}")
+                    if (not full_response) and reasoning:
+                        print(
+                            f"{BColors.WARNING}[LLM_Prompt_Formatter]:模型未返回结果但检测到思考内容，以思考内容作为结果。{BColors.ENDC}")
+                        full_response = reasoning
+                    # # XML 匹配
+                    match = re.search(r"```(?:xml)?\s*(.*?)\s*```", full_response, re.DOTALL)
+                    if match:
+                        xml_content = match.group(1).strip()
+                        # 剩下的部分作为 text_out
+                        text_content = full_response.replace(match.group(0), "").strip()
+                    else:
+                        print(
+                            f"{BColors.WARNING}[LLM_Prompt_Formatter]: 解析代码块失败，正在尝试进一步分离{BColors.ENDC}")
+                        # 如果没有代码块，检查是否有明显的 XML 标签结构
+                        if "<img>" in full_response and "</img>" in full_response:  # 有完整结构
+                            start = full_response.find("<img>")
+                            end = full_response.rfind("</img>") + 6
+                            xml_content = full_response[start:end]
+                            text_content = full_response[:start] + full_response[end:]
+                        elif "<img>" in full_response:  # 有一半结构
+                            start = full_response.find("<img>")
+                            xml_content = full_response[start:]
+                            text_content = ""
+                            print(
+                                f"{BColors.WARNING}[LLM_Prompt_Formatter]: 大模型的回复可能被截断。以下是大模型的回复：\n {full_response} {BColors.ENDC}")
+                            raise ValueError("LLM API 的回复可能被截断。")
+                        else:  # 完全没有
+                            xml_content = full_response
+                            text_content = ""
+                            print(
+                                f"{BColors.FAIL}[LLM_Prompt_Formatter]: 大模型的回复中未检测到<img>标签。以下是大模型的回复：\n {full_response} {BColors.ENDC}")
+                            raise ValueError("LLM API 的回复中未检测到<img>标签。")
+                    # 一切正常的话，完成清理并跳出循环返回
+                    xml_content = clean_prompt(xml_content, gemma_prompt)
+                    return (xml_content, text_content)
+                except Exception as inner_e:
+                    # 识别是否是 API Key 相关的鉴权错误，这种没必要重试
+                    err_msg = str(inner_e).lower()
+                    if any(kw in err_msg for kw in ["api key", "authentication", "401", "unauthorized"]):
+                        raise inner_e
 
-            if  hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
-                reasoning=response.choices[0].message.reasoning_content
-                found_thinking=True
-                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+                    # 【修改点1】如果不全是鉴权错误且尝试次数还没满，则重试
+                    if attempt < max_retries:
+                        print(
+                            f"{BColors.WARNING}[LLM_Prompt_Formatter]: 遇到网络抖动或API报错 ({inner_e})，正在进行第 {attempt + 1} 次重试...{BColors.ENDC}")
+                        continue
+                    else:
+                        # 努力了3次还是不行，直接抛出
+                        raise inner_e
 
-            match = re.search(r'<think>(.*?)</think>', full_response, re.DOTALL)
-            if match:
-                found_thinking=True
-                reasoning=match.group(1)
-                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
-                full_response = re.sub(r'<think>(.*?)</think>', "", full_response, flags=re.DOTALL)
-                full_response = full_response.strip()
-
-            if thinking and not found_thinking:
-                print(
-                    f"{BColors.WARNING}[LLM_Prompt_Formatter]:虽然您开启了思考开关，但是未解析到思考内容。{BColors.ENDC}")
-
-            if (not full_response) and reasoning:
-                print(
-                    f"{BColors.WARNING}[LLM_Prompt_Formatter]:模型未返回结果但检测到思考内容，以思考内容作为结果。{BColors.ENDC}")
-                full_response = reasoning
-
-            # # XML 匹配
-            match = re.search(r"```(?:xml)?\s*(.*?)\s*```", full_response, re.DOTALL)
-
-            if match:
-                xml_content = match.group(1).strip()
-                # 剩下的部分作为 text_out
-                text_content = full_response.replace(match.group(0), "").strip()
-            else:
-                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 解析代码块失败，正在尝试进一步分离{BColors.ENDC}")
-
-                # 如果没有代码块，检查是否有明显的 XML 标签结构
-                if "<img>" in full_response and "</img>" in full_response: #有完整结构
-                    start = full_response.find("<img>")
-                    end = full_response.rfind("</img>") + 6
-                    xml_content = full_response[start:end]
-                    text_content = full_response[:start] + full_response[end:]
-                elif "<img>" in full_response: #有一半结构
-                    start = full_response.find("<img>")
-                    xml_content = full_response[start:]
-                    text_content = ""
-                    print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 大模型的回复可能被截断。以下是大模型的回复：\n {full_response} {BColors.ENDC}")
-                else: #完全没有
-                    xml_content = full_response
-                    text_content = ""
-                    print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: 大模型的回复中未检测到<img>标签。以下是大模型的回复：\n {full_response} {BColors.ENDC}")
-
-            xml_content=clean_prompt(xml_content,gemma_prompt)
-            return (xml_content, text_content)
 
         except Exception as e:
             print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: {str(e)}, 请确认 API 配置是否正确。{BColors.ENDC}")
