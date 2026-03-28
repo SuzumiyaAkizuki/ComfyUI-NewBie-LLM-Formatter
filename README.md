@@ -84,6 +84,8 @@ comfy node install NewBie-LLM-Formatter
 
 ### Few-shot 注入的请求体结构
 
+> 开发者笔记：few-shot技术是一种提示词工程，旨在通过在提示中提供少量输入-输出示例，让大语言模型快速理解任务模式并生成符合预期的回答。出于某些原因，我无法提供few-shot的示例内容。但是，你可以利用某些方面能力更强的LLM（比如grok）生成一轮示例对话，并填入few-shot注入词中，之后改用其它通用能力更强的模型（比如gemini）。
+
 当 `fewshot_user` 和 `fewshot_assistant` 均不为空时，请求体结构如下：
 
 ```python
@@ -159,9 +161,12 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 >
 > **免费额度提示：** 在 [DeepSeek 开放平台](https://platform.deepseek.com) 注册后可获赠 10 元免费额度，大约可使用 1000 次。
 
+**进阶用法 (Few-Shot)**：
+
+1.2.3 版本起，你可以在 `LPF_config.json` 中配置 `fewshot_user` 和 `fewshot_assistant` 字段，为 LLM 注入一轮前置对话上下文，用于定向增强模型在特定领域的表现。
+
 <details open>
 <summary>节点示例输入输出</summary>
-
 **纯文本示例输入：**
 
 ```
