@@ -6,15 +6,16 @@
 
 ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202602100940021.png)
 
-利用大语言模型 API 将自然语言或图片自动转化为适用于 NewBie 模型的结构化 XML 提示词。通过提供高度健壮的提示词生成与画面风格管理节点，显著提升了图像生成流程的效率与效果。
+利用大语言模型 API 将自然语言或图片自动转化为适用于 NewBie 模型的结构化 XML 提示词，或适用于 Anima 等其他模型的纯文本提示词。通过提供高度健壮的提示词生成与画面风格管理节点，显著提升了图像生成流程的效率与效果。
 
 本插件的核心特性有：
 
--  **智能提示词转化**：支持将简单的自然语言、Danbooru 标签串，完美转化为 NewBie 模型所需的标准 XML 格式。
--  **多模态视觉反推**：支持传入图片，利用多模态大模型直接反推生成高精度 XML 提示词。
--  **高鲁棒性与自动修复**：内置 XML 语法解析与自动修复机制，外加 API 网络异常/格式异常自动重试逻辑（最高 3 次），确保工作流不中断。
--  **画风预设与管理**：内置数十种高质量艺术家/画风预设，支持一键注入，并提供在 UI 中直接保存新画风的节点。
--  **深度思考与破限支持**：适配主流 API 的“深度思考”模式（Deepseek, OpenRouter, Gemini, MIMO 等），内置 NSFW 提示词破限框架。
+- **双模式支持**：NewBie 模式生成结构化 XML 提示词；Anima 模式生成纯文本提示词（质量词 + 标签 + 自然语言描述），两种模式可在节点内无缝切换。
+- **智能提示词转化**：支持将简单的自然语言、Danbooru 标签串，完美转化为目标模型所需的提示词格式。
+- **多模态视觉反推**：支持传入图片，利用多模态大模型直接反推生成高精度提示词。
+- **高鲁棒性与自动修复**：内置 XML 语法解析与自动修复机制，外加 API 网络异常/格式异常自动重试逻辑（最高 3 次），确保工作流不中断。
+- **画风预设与管理**：内置数十种高质量艺术家/画风预设，支持一键注入，并提供在 UI 中直接保存新画风的节点。
+- **深度思考与破限支持**：适配主流 API 的"深度思考"模式（Deepseek、OpenRouter、Gemini、Anthropic、Kimi、MIMO、Vercel 等），内置 NSFW 提示词破限框架。
 
 - 项目 GitHub 地址：https://github.com/SuzumiyaAkizuki/ComfyUI-NewBie-LLM-Formatter
 - 项目 ComfyUI Registry 地址：https://registry.comfy.org/zh/nodes/NewBie-LLM-Formatter
@@ -75,16 +76,31 @@ comfy node install NewBie-LLM-Formatter
 | `api_key` | `string` | LLM 的 API Key。**强烈建议在此处填写，而非在节点 UI 中输入**，否则 API Key 会随工作流原图泄露。 |
 | `api_url` | `string` | API 服务的主机地址，例如 `https://openrouter.ai/api/v1`。 |
 | `model_list` | `array` | 可用模型名称列表，将显示在节点的下拉框中。 |
-| `system_prompt` | `string` | 发送给 LLM 的系统提示词，内置了基本的格式化指令和破限命令。可自行修改以调整 LLM 的行为。 |
-| `gemma_prompt` | `string` | 拼接在 XML 输出前的固定引导词，用于指导 NewBie 模型（Gemma）理解提示词格式。通常无需修改。 |
+| `system_prompt` | `string` | **NewBie 模式**发送给 LLM 的系统提示词，内置了基本的格式化指令和破限命令。可自行修改以调整 LLM 的行为。 |
 | `gemini_jailbreaker` | `string` | 针对非 Gemini 官方平台的 Gemini 模型的增强提示词，会拼接在 `system_prompt` 之前。仅在使用非官方 Gemini API 中转时生效。 |
-| `fewshot_user` | `string` | Few-shot 注入功能：此字段为注入的一轮对话中「用户」的内容。与 `fewshot_assistant` 同时填写时生效。 |
-| `fewshot_assistant` | `string` | Few-shot 注入功能：此字段为注入的一轮对话中「AI」的回复内容。可用于增强模型在特定方面的输出能力。 |
+| `fewshot_user` | `string` | **NewBie模式**Few-shot 注入功能：此字段为注入的一轮对话中「用户」的内容。与 `fewshot_assistant` 同时填写时生效。 |
+| `fewshot_assistant` | `string` | **NewBie模式**Few-shot 注入功能：此字段为注入的一轮对话中「AI」的回复内容。可用于增强模型在特定方面的输出能力。 |
+| `gemma_prompt` | `string` | 拼接在 **NewBie 模式** XML 输出前的固定引导词，用于指导 NewBie 模型（Gemma3 4B）理解提示词格式。通常无需修改。Anima 模式下不使用此字段。 |
+| `system_prompt_anima` | `string` | **Anima 模式**发送给 LLM 的系统提示词。需要指导模型输出格式为：第一行质量词、第二行有含义的标签、第三行英文自然语言描述、第四行中文描述（作为 `text_out` 输出）。 |
+| `fewshot_user_anima` | `string` | **Anima模式**Few-shot 注入功能。与 `fewshot_assistant_anima` 同时填写时生效。 |
+| `fewshot_assistant_anima` | `string` | **Anima模式**Few-shot 注入功能。 |
+| `artists_anima` | `string` | **Anima模式**参考画师列表，指导LLM选择合适的画师。可以在[这个视频](https://www.bilibili.com/video/BV1Q1w1zKEwk)或者[这个链接](https://drive.google.com/file/d/1CtcODfWbDl8KThORS0GHZfcWKCCMUUmD/view)中下载对应的内容。为保护作者的知识产权，这里不提供对应的文本。 |
 | `styles` | `object` | 预设风格提示词集合，供 XML Style Injector 节点使用。可通过 Style Preset Saver 节点或直接编辑此文件来添加风格。 |
+
+### Anima 模式提示词格式
+
+`system_prompt_anima`要求 LLM 输出以换行分隔的四段内容
+
+```
+Line 1: quality and aesthetic tags (e.g. masterpiece, score_9, ...)
+Line 2: subject and scene tags (e.g. 1girl, white_hair, ...)
+Line 3: English natural language description
+Line 4: 中文自然语言描述（将作为 text_out 输出）
+```
 
 ### Few-shot 注入的请求体结构
 
-> 开发者笔记：few-shot技术是一种提示词工程，旨在通过在提示中提供少量输入-输出示例，让大语言模型快速理解任务模式并生成符合预期的回答。出于某些原因，我无法提供few-shot的示例内容。但是，你可以利用某些方面能力更强的LLM（比如grok）生成一轮示例对话，并填入few-shot注入词中，之后改用其它通用能力更强的模型（比如gemini）。
+> 开发者笔记：few-shot技术是一种提示词工程，旨在通过在提示中提供少量输入-输出示例，让大语言模型快速理解任务模式并生成符合预期的回答。出于某些原因，我无法提供few-shot的示例内容。但是，你可以利用某些方面能力更强的LLM（比如grok）生成一轮示例对话，并填入few-shot注入词中，之后改用其它通用能力更强的LLM（比如gemini）。
 
 当 `fewshot_user` 和 `fewshot_assistant` 均不为空时，请求体结构如下：
 
@@ -115,9 +131,7 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 
 ### 1. LLM Xml Prompt Formatter
 
-**功能：** 调用 LLM API，将用户输入的自然语言或标签集格式化为 `xml` 格式提示词，供 NewBie 模型使用。
-
-![image-20260113122948204](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202601131230416.png)
+**功能：** 调用 LLM API，将用户输入的自然语言或标签集格式化为提示词，根据所选模式输出 XML 格式（NewBie）或纯文本格式（Anima）。
 
 **输入参数：**
 
@@ -127,6 +141,7 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | `api_key` | STRING | API Key。若配置文件中已有有效值，此处输入不生效。 |
 | `api_url` | STRING | API 主机地址。若配置文件中已有有效值，此处输入不生效。 |
 | `model_name` | STRING/下拉框 | 模型名称。若配置文件中的 `model_list` 有效，显示为下拉框；否则显示为文本输入框。 |
+| `mode` | 下拉框 | **NewBie**（默认）或 **Anima**。决定使用哪套 system prompt 以及输出解析方式。 |
 | `thinking` | BOOLEAN | 深度思考模式开关。`true` 时模型进行深度思考，思考过程输出到控制台。**推荐设置为 `false`。** |
 | `user_text` | STRING | 待转换的自然语言描述或标签集。 |
 
@@ -134,13 +149,22 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 
 | 参数 | 说明 |
 |------|------|
-| `xml_out` | 清洗并修复后的 `xml` 格式提示词，可直接接入 NewBie 模型。 |
-| `text_out` | LLM 输出的 XML 代码块以外的额外说明信息（通常为中文翻译）。 |
+| `xml_out` | NewBie 模式：清洗并修复后的 XML 格式提示词。Anima 模式：LLM 输出中所有英文内容（质量词 + 标签 + 英文描述）。 |
+| `text_out` | NewBie 模式：LLM 输出的 XML 代码块以外的额外说明信息。Anima 模式：LLM 输出中所有中文内容（通常为中文描述）。 |
+
+**两种模式的行为差异：**
+
+| 行为 | NewBie 模式 | Anima 模式 |
+|------|------------|-----------|
+| 使用的 system prompt | `system_prompt` | `system_prompt_anima` |
+| `gemma_prompt` 前缀 | 拼接到输出前 | 不使用 |
+| 输出解析 | 提取 XML 代码块，校验并修复格式 | 按行分离中英文，英文→`xml_out`，中文→`text_out` |
+| XML 自动修复 | 启用 | 不启用 |
 
 **内置鲁棒性机制：**
 
 - **自动重试**：遇到网络抖动或 API 报错时，最多自动重试 3 次。
-- **XML 自动修复**：使用 `lxml` 库对 LLM 输出的 XML 进行格式校验；若检测到格式错误，会自动修复并在控制台打印差异对比，大幅降低格式错误导致的流程中断。
+- **XML 自动修复**（仅 NewBie 模式）：使用 `lxml` 库对 LLM 输出的 XML 进行格式校验；若检测到格式错误，会自动修复并在控制台打印差异对比。
 
 **推荐模型（计价参考 [OpenRouter](https://openrouter.ai/)，均关闭思考模式）：**
 
@@ -152,21 +176,18 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | `xiaomi/mimo-v2-flash` | ~0.0004 | 较好 | 一般 | — |
 | `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` | 免费 | 官方宣称无审查 | 较差 | — |
 
-> **思考模式说明：** 目前仅适配了 OpenRouter、DeepSeek、小米 MIMO 和 Gemini 官方平台。其他平台请通过模型名称控制（如用 `deepseek-chat` 代替 `deepseek-reasoner`）。
+> **思考模式说明：** 目前适配了 OpenRouter、DeepSeek、Google AI、Anthropic 官方、Kimi、小米 MIMO 和 Vercel AI Gateway 平台。其他平台请通过模型名称控制（如用 `deepseek-chat` 代替 `deepseek-reasoner`）。
 >
 > **开发者建议：**
 >
 > - 强烈建议关闭思考模式。关闭时每次约消耗 3000–4000 tokens；开启时可能消耗 5000–10000 tokens，且关闭思考有时反而能提升 NSFW 效果。
-> - 不建议使用参数量不远高于 4B 的模型。NewBie 本身已内置 Gemma3 4B，使用同等量级的外部 LLM 意义不大。
+> - 不建议使用参数量不远高于 4B 的模型。NewBie 本身已内置 Gemma3 4B，Anima已内置qwen3 0.6B，使用同等量级的外部 LLM 意义不大。
 >
 > **免费额度提示：** 在 [DeepSeek 开放平台](https://platform.deepseek.com) 注册后可获赠 10 元免费额度，大约可使用 1000 次。
 
-**进阶用法 (Few-Shot)**：
-
-1.2.3 版本起，你可以在 `LPF_config.json` 中配置 `fewshot_user` 和 `fewshot_assistant` 字段，为 LLM 注入一轮前置对话上下文，用于定向增强模型在特定领域的表现。
-
 <details open>
-<summary>节点示例输入输出</summary>
+<summary>NewBie 模式节点示例输入输出</summary>
+
 **纯文本示例输入：**
 
 ```
@@ -218,53 +239,34 @@ You are an assistant designed to generate high-quality anime images with the hig
 </img>
 ```
 
-**`text_out` 示例输出：**
+</details>
+
+<details open>
+<summary>Anima 模式节点示例输入输出</summary>
+
+**示例输入：**
 
 ```
-画面描绘了一个未来科幻风格的指挥中心，充满全息显示屏和战术地图的蓝光投影。左侧是一位金发双马尾的萝莉指挥官，穿着短和服配红色腰带，戴着耳机正在专注地指挥战斗……
+A：1girl,white_hair,blue_eyes, medium_hair, high_ponytail, small_breasts, sidelocks,serafuku,deep_blue_skirt, white_shirt, deep_blue_sailor_collar,  short_sleeves, short_skirt, shirt_tucked_in,elbow_pads, fingerless_gloves, shorts_under_skirt,toned, tactical_school_uniform,red_neckerchief,utility belt
+
+上述人物的上半身特写(upper_body, close-up)，从正面视角注视着观众(straight-on, facing_viewer)。她骄傲地挺胸抬头(confident, proud,arched_back)、并在眼睛上方比出“V”字手势的姿势(v_over_eye)，另一只手叉腰(hand_on_own_hip)。她戴着耳麦和战术头盔(fast helmet, headset)，全身（胸部、大腿）戴着攀岩时用的全身安全带(full body harness,chest harness,leg loops,waist belt)。她的头发和衣服被风吹动(wind_lift)。背景是充满活力的抽象构图，由多彩的玻璃碎片、蓝色和紫色调以及图形元素组成，保持了酷炫且时尚的氛围。
+
+要求人物是萌系画风，可爱一点。
 ```
 
-**图片示例输入：**
-
-![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512252130733.png)
+**`xml_out` 示例输出（英文部分）：**
 
 ```
-把图中的人物换成(white hair,high ponytail,white serafuku,short sleeves,short skirt,shirt tucked in,jacket,knee pads,elbow pads,fingerless_gloves,white legwear,kneehighs,high-top hiking sneakers,sidelocks,small breasts,shorts under skirt)
+masterpiece, best quality, good quality, score_9, score_8, score_7, year_2025, highres, @kantoku, @tiv, @mika_pikazo, @anmi,
+1girl, white_hair, blue_eyes, medium_hair, high_ponytail, small_breasts, sidelocks, serafuku, white_shirt, deep_blue_skirt, deep_blue_sailor_collar, short_sleeves, short_skirt, shirt_tucked_in, red_neckerchief, utility_belt, shorts_under_skirt, elbow_pads, fingerless_gloves, toned, tactical_school_uniform, fast_helmet, headset, full_body_harness, chest_harness, leg_loops, waist_belt, upper_body, close-up, straight-on, facing_viewer, confident, proud, arched_back, v_over_eye, hand_on_hip, wind_lift, abstract_background, glass_shards, blue_theme, purple_theme, graphic_background,
+An adorable girl with white hair and striking blue eyes poses confidently in her tactical sailor uniform. She stands with an arched back and one hand on her hip, making a cute "V" sign over her eye while looking directly at the viewer with a proud expression. Her high ponytail and white shirt flutter in the wind. She is equipped with a FAST helmet, headset, and a complex full-body climbing harness over her outfit. The background is a stylish and cool abstract composition featuring vibrant blue and purple glass shards and modern graphic elements.
 ```
 
-**图片示例输出：**
+**`text_out` 示例输出（中文部分）：**
 
-```xml
-You are an assistant designed to generate high-quality anime images with the highest degree of image-text alignment based on xml format textual prompts. <Prompt Start>
-
-<img>
- <character_1>
- <n>original_character</n>
- <gender>1girl</gender>
- <appearance>white_hair, high_ponytail, sidelocks, small_breasts, yellow_eyes, long_hair</appearance>
- <clothing>white_serafuku, short_sleeves, short_skirt, shirt_tucked_in, jacket, knee_pads, elbow_pads, fingerless_gloves, white_legwear, kneehighs, high-top_hiking_sneakers, shorts_under_skirt</clothing>
- <expression>thoughtful, focused</expression>
- <action>sitting, writing, holding_pen, leaning_forward</action>
- <position>center</position>
- </character_1>
-
- <general_tags>
- <count>1girl, solo</count>
- <style>anime_style, realistic_shading</style>
- <background>indoor, library, bookshelves, wooden_desk, wooden_chair, window, cherry_blossoms_outside_window, books_on_desk</background>
- <atmosphere>serene, evening</atmosphere>
- <quality>very_aesthetic, masterpiece, no_text</quality>
- <resolution>max_high_resolution</resolution>
- <artist>rella, maccha_(mochancc), tidsean, wlop, ciloranko, atdan, year_2024</artist>
- <objects>lamp, desk_lamp, stack_of_books, pen</objects>
- <other>from_side, detailed_background</other>
- </general_tags>
-
- <caption>A girl with white hair in a high ponytail and sidelocks sits thoughtfully at a wooden desk in a cozy library room during evening...</caption>
-</img>
 ```
-
-![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512252157926.png)
+一位拥有白发和深邃蓝眸的可爱女孩穿着她的战术水手服自信地摆出姿势。她挺起胸膛，一只手叉腰，在眼睛上方比出可爱的“V”字手势，带着骄傲的神情直视观众。她的高马尾和白色衬衫在微风中飘动。她佩戴着战术头盔、耳麦，并在制服外穿着一套复杂的全身攀爬安全带。背景是一个时尚酷炫的抽象构图，充满了充满活力的蓝色和紫色玻璃碎片以及现代图形元素。
+```
 
 </details>
 
@@ -272,15 +274,14 @@ You are an assistant designed to generate high-quality anime images with the hig
 
 ### 2. XML Style Injector
 
-**功能：** 替换 `xml` 格式提示词中的 `<artist>` 和 `<style>` 风格信息，实现快速切换画风预设。
-
-![image-20260113123426220](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202601131234704.png)
+**功能：** 将画师和风格信息注入到提示词中，支持 NewBie（XML）和 Anima（纯文本）两种模式。
 
 **输入参数：**
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `xml_input` | STRING | 待处理的 `xml` 格式提示词文本（通常来自 LLM Xml Prompt Formatter 的 `xml_out` 输出）。 |
+| `xml_input` | STRING | 待处理的提示词文本。NewBie 模式下应为含 `<img>` 标签的 XML；Anima 模式下应为换行分隔的纯文本。 |
+| `mode` | 下拉框 | **NewBie** 或 **Anima**，需与 LLM Xml Prompt Formatter 节点的模式保持一致。 |
 | `preset` | 下拉框 | 选择预设风格提示词集合，内容来自 `LPF_config.json` 的 `styles` 字段。 |
 | `artist_add` | STRING（可选） | 额外的画师标签，将**拼接在预设画师列表之前**。 |
 | `style_add` | STRING（可选） | 额外的风格标签，将**拼接在预设风格列表之前**。 |
@@ -289,43 +290,43 @@ You are an assistant designed to generate high-quality anime images with the hig
 
 | 参数 | 说明 |
 |------|------|
-| `xml_output` | 注入风格后的 `xml` 格式提示词。 |
+| `xml_output` | 注入风格后的提示词。 |
 
-**使用说明：** 节点会查找 XML 中的 `<artist>` 和 `<style>` 标签并替换为选定预设的内容。若 XML 中不存在对应标签，节点会尝试在 `<general_tags>` 容器下创建。配置文件内置约 40 个预设风格串，可在[此链接](https://docs.qq.com/sheet/DTUNCQW5TWFBMVGhY?tab=BB08J2)查看例图。
+**NewBie 模式行为：**
 
-<details open>
-<summary>节点示例输入输出</summary>
+查找 XML 中的 `<artist>` 和 `<style>` 标签并替换为选定预设的内容。若 XML 中不存在对应标签，节点会尝试在 `<general_tags>` 容器下创建。若对应字段为空，则不修改原标签内容。
 
-示例输入：选择预设 `飘渺杰作光影集`，在 `artist_add` 中填写 `daito, kataokasan`
+**Anima 模式行为：**
 
-**示例输出：**
+> 开发者笔记：适用于NewBie模型的画风串不一定适用于Anima模型。
 
-```xml
-<img>
-  ...
-  <general_tags>
-  <count>2girls</count>
-  <style>**ultimate masterpiece digital painting**, **ethereal lighting**, **dreamy aesthetic**, ...</style>
-  <artist>kataokasan, daito, pottsness, midori_fufu, kazutake_hazano, ...</artist>
-  ...
-  </general_tags>
-  ...
-</img>
-```
+Anima 模式下的画师和风格注入逻辑：
 
-**最终生成的图片：**
+- **画师注入位置**：注入到第一行（质量词行）之后。若第二行已是独立的画师行（整行均为 `@xxx` 格式），则整行替换；否则先清除第一行中内嵌的 `@xxx` 标记，再在其后插入新画师行。
+- **风格注入位置**：追加到整个提示词的最末尾。
+- **空字段行为**：若 `artist_add` 和预设画师均为空，则不修改画师内容；若风格字段均为空，则不追加风格，保持原内容不变（与 NewBie 模式对齐）。
 
-![图片示例](https://raw.githubusercontent.com/SuzumiyaAkizuki/image/main/ComfyUI_00221_.png)
+**Anima 模式画师格式：**
 
-</details>
+输入的画师字符串在注入前会经过以下清洗步骤：
+
+1. 删除方括号、大括号、圆括号：`[ciloranko]` → `ciloranko`
+2. 删除 `artist:` 前缀（大小写不敏感）：`artist:rella` → `rella`
+3. 删除冒号权重（`:1.2`、`:0.93` 等），再删除所有剩余冒号
+4. 删除独立的数字/小数（不紧邻字母或下划线的数字）：`wlop 1.1` → `wlop`；`year_2024` 中的 `2024` 紧邻下划线，保留
+5. 将名称内部空格替换为下划线：`some artist` → `some_artist`
+6. 为每个名称添加 `@` 前缀：`rella` → `@rella`
+
+示例：`[ciloranko], maccha_(mochancc), (tidsean:1.2), wlop 1.1, year_2024`
+→ `@ciloranko, @maccha_mochancc, @tidsean, @wlop, @year_2024`
+
+配置文件内置约 40 个预设风格串，可在[此链接](https://docs.qq.com/sheet/DTUNCQW5TWFBMVGhY?tab=BB08J2)查看例图。
 
 ---
 
 ### 3. Style Preset Saver
 
 **功能：** 从当前提示词中自动提取 `<artist>` 和 `<style>` 标签，并将其保存为新的风格预设到 `LPF_config.json` 中，方便后续在 XML Style Injector 中调用。
-
-![image-20260113123613316](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202601131236975.png)
 
 **输入参数：**
 
@@ -340,6 +341,8 @@ You are an assistant designed to generate high-quality anime images with the hig
 | 参数 | 说明 |
 |------|------|
 | `extracted_tags` | 从输入中提取到的风格标签预览，格式为 `<artist>...</artist>\n<style>...</style>`，无论是否保存均会输出。 |
+
+> **注意：** Style Preset Saver 目前仅支持从 XML 格式（NewBie 模式）的提示词中提取标签。预设保存格式与模式无关，保存后的预设可在 NewBie 和 Anima 两种模式下的 XML Style Injector 中使用。
 
 ---
 
@@ -366,6 +369,18 @@ You are an assistant designed to generate high-quality anime images with the hig
 
 <details open>
 <summary>展开/折叠更新历史</summary>
+
+### 2026年04月08日 v1.2.5 [exp]
+
+> 此版本是实验性版本，未经大量测试用例测试，可能存在BUG。
+
+- 新增 **Anima 模式**，支持生成适用于 Anima 模型的纯文本提示词（质量词 + 标签 + 自然语言描述）。
+  - LLM Xml Prompt Formatter 和 XML Style Injector 均新增 `mode` 单选控件（NewBie / Anima）。
+  - Anima 模式使用独立的 `anima_system_prompt` 配置字段；不使用 `gemma_prompt` 前缀；跳过 XML 解析，直接按行分离中英文。
+  - Anima 模式风格注入：画师以 `@画师名` 格式注入到质量词行之后，风格串追加到末尾；若对应字段为空则不修改原内容。
+  - Anima 模式画师字符串清洗：自动去除括号、`artist:` 前缀、冒号权重及独立数字、将空格替换为下划线。
+- 新增 **Anthropic、Kimi、Vercel AI Gateway** 三个平台的深度思考控制支持。
+- 更新了很多预设风格串。
 
 ### 2026年03月17日 v1.2.3
 
