@@ -203,8 +203,8 @@ _ANIMA_OUTPUT_FORMAT = """
 [分点说明该提示词的设计逻辑，每一点对应提示词中的一个模块或关键选择]
 ```
 ### 标签处理规则
-- 标签内部的空格必须替换为下划线 `_`（如 `red eyes` → `red_eyes`）
-- 标签名内的括号必须用反斜杠转义（如 `momoko (momopoco)` → `momoko_\\(momopoco\\)`）
+- 标签内部的下划线 `_`必须替换为空格（如 `red_eyes` → `red eyes`）
+- 标签名内的括号必须用反斜杠转义（如 `momoko (momopoco)` → `momoko \\(momopoco\\)`）
 - 标签和标签之间用一个逗号和一个空格链接。示例：`tag a, tag b, tag c`
 
 
