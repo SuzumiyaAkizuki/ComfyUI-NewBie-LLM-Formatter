@@ -1,13 +1,9 @@
-import io
 import os
 import re
 import json
-import base64
-import difflib
 from openai import OpenAI
-from lxml import etree
-import numpy as np
-from PIL import Image
+from prompt_agent.agent_core import PromptAgent
+from prompt_agent import utils
 
 
 class BColors:
@@ -17,6 +13,58 @@ class BColors:
 
 CONFIG_FILENAME = "LPF_config.json"
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
+
+
+def get_platform_settings(api_url: str, model_name: str, thinking: bool) -> dict:
+    """
+    根据 API 平台和思考模式设置，返回 extra_body 参数。
+    从 LLM_Prompt_Formatter.get_platform_settings 提取为模块级函数，
+    供 Agent 模式和普通模式共用。
+    """
+    extra_body = {}
+
+    def _is_claude_46_plus(name):
+        n = name.lower()
+        return ('claude-sonnet-4-6' in n or 'claude-opus-4-6' in n
+                or 'sonnet-4.6' in n or 'opus-4.6' in n)
+
+    if 'openrouter' in api_url:
+        if thinking:
+            extra_body = {"reasoning": {"enabled": True, "exclude": False}}
+        else:
+            extra_body = {"reasoning": {"enabled": False, "effort": "minimal"}}
+
+    elif 'googleapis' in api_url:
+        if not thinking:
+            if '3' in model_name or '2.5-pro' in model_name:
+                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: googleapis平台的{model_name}模型无法彻底关闭思考功能。已将思考模式设置为low。{BColors.ENDC}")
+                extra_body = {"reasoning_effort": "low"}
+            else:
+                extra_body = {"reasoning_effort": "none"}
+
+    elif 'xiaomimimo' in api_url or 'moonshot' in api_url or 'deepseek' in api_url:
+        if thinking:
+            extra_body = {"thinking": {"type": "enabled"}}
+        else:
+            extra_body = {"thinking": {"type": "disabled"}}
+
+    elif 'anthropic.com' in api_url:
+        if thinking:
+            if _is_claude_46_plus(model_name):
+                extra_body = {"thinking": {"type": "adaptive"}}
+            else:
+                extra_body = {"thinking": {"type": "enabled", "budget_tokens": 8000}}
+
+    elif 'vercel' in api_url:
+        if thinking:
+            extra_body = {"reasoning": {"enabled": True, "max_tokens": 8000}}
+        else:
+            extra_body = {"reasoning": {"enabled": False}}
+
+    else:
+        print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 思考模式开关暂不支持您使用的API平台。{BColors.ENDC}")
+
+    return extra_body
 
 
 def load_api_config():
@@ -29,21 +77,7 @@ def load_api_config():
     return {}
 
 
-def split_by_language(text):
-    """Split text into English and Chinese parts.
-    Handles both real newlines and literal \\n that some models emit.
-    """
-    # Normalize literal \n sequences into real newlines
-    text = text.replace('\\n', '\n')
-    lines = text.splitlines()
-    en_lines = []
-    zh_lines = []
-    for line in lines:
-        if re.search(r'[\u4e00-\u9fff]', line):
-            zh_lines.append(line)
-        elif line.strip():
-            en_lines.append(line)
-    return "\n".join(en_lines).strip(), "\n".join(zh_lines).strip()
+# split_by_language, clean_prompt, repair_xml_custom \u5df2\u8fc1\u79fb\u81f3 prompt_agent.utils
 
 
 
@@ -94,6 +128,7 @@ class LLM_Prompt_Formatter:
                               {"multiline": True, "default": default_user_text, "dynamicPrompts": False}),
                 "thinking": ("BOOLEAN", {"default": False}),
                 "mode": (["NewBie", "Anima"],),
+                "agent_effort": (["Close", "Low", "Medium", "High"],),
             },
             "optional": {
                 "image": ("IMAGE",),
@@ -106,104 +141,50 @@ class LLM_Prompt_Formatter:
     FUNCTION = "process_text"
     CATEGORY = "NewBie LLM Formatter"
 
-    def tensor_to_base64(self, image_tensor):
-        i = 255. * image_tensor[0].cpu().numpy()
-        img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
-        buffered = io.BytesIO()
-        img.save(buffered, format="JPEG", quality=90)
-        return base64.b64encode(buffered.getvalue()).decode('utf-8')
-
     def get_platform_settings(self, api_url, model_name, thinking):
-        extra_body = {}
+        return get_platform_settings(api_url, model_name, thinking)
 
-        # Detect Claude 4.6+ models which support adaptive thinking
-        def _is_claude_46_plus(name):
-            n = name.lower()
-            return ('claude-sonnet-4-6' in n or 'claude-opus-4-6' in n
-                    or 'sonnet-4.6' in n or 'opus-4.6' in n)
+    # ── 辅助方法（从 process_text 拆分）─────────────────────────────────
 
-        if 'openrouter' in api_url:
-            if thinking:
-                extra_body = {"reasoning": {"enabled": True, "exclude": False}}
-            else:
-                extra_body = {"reasoning": {"enabled": False, "effort": "minimal"}}
-
-        elif 'deepseek' in api_url:
-            if thinking:
-                extra_body = {"reasoning": {"type": "enabled"}}
-
-        elif 'googleapis' in api_url:
-            if not thinking:
-                if '3' in model_name or '2.5-pro' in model_name:
-                    print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: googleapis平台的{model_name}模型无法彻底关闭思考功能。已将思考模式设置为low。{BColors.ENDC}")
-                    extra_body = {"reasoning_effort": "low"}
-                else:
-                    extra_body = {"reasoning_effort": "none"}
-
-        elif 'xiaomimimo' in api_url or 'moonshot' in api_url:
-            # Xiaomi MIMO and Kimi (api.moonshot.cn) share the same thinking param format.
-            if thinking:
-                extra_body = {"thinking": {"type": "enabled"}}
-            else:
-                extra_body = {"thinking": {"type": "disabled"}}
-
-        elif 'anthropic.com' in api_url:
-            # Anthropic official API (api.anthropic.com).
-            # The OpenAI-compatible endpoint accepts the thinking param via extra_body.
-            if thinking:
-                if _is_claude_46_plus(model_name):
-                    extra_body = {"thinking": {"type": "adaptive"}}
-                else:
-                    # Older Claude models: manual budget required
-                    extra_body = {"thinking": {"type": "enabled", "budget_tokens": 8000}}
-            # When thinking=False, omit the param entirely; Anthropic defaults to off.
-
-        elif 'vercel' in api_url:
-            # Vercel AI Gateway (ai-gateway.vercel.sh/v1).
-            # The gateway exposes a unified reasoning field in extra_body that it
-            # translates to each provider's native format server-side.
-            # Docs: https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/advanced
-            if thinking:
-                extra_body = {"reasoning": {"enabled": True, "max_tokens": 8000}}
-            else:
-                extra_body = {"reasoning": {"enabled": False}}
-
-        else:
-            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 思考模式开关暂不支持您使用的API平台。{BColors.ENDC}")
-
-        return extra_body
-
-    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, image=None):
-        config = load_api_config()
-        config_key = config.get("api_key")
-        config_url = config.get("api_url")
+    @staticmethod
+    def _resolve_credentials(config, api_key, api_url):
+        """解析 API 凭据：配置文件优先，UI 输入作为回退。
+        Returns (final_key, final_url). 缺失时抛出 RuntimeError。
+        """
         key_placeholders = ["sk-...", "读取API失败，请在此填写api key", "", "已从配置文件中读取api key，在此填写将不生效", None]
         url_placeholders = ["https://xxx.ai/api/v1", "读取API失败，请在此填写api url", "", "已从配置文件中读取api url，在此填写将不生效", None]
+
+        config_key = config.get("api_key")
+        config_url = config.get("api_url")
 
         if config_key and config_key not in key_placeholders:
             final_key = config_key.replace(" ", "")
             print(f"[LLM_Prompt_Formatter]: 已从配置文件中读取API KEY.")
+        elif api_key and api_key not in key_placeholders:
+            final_key = api_key.replace(" ", "")
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 已从UI输入中读取API KEY.{BColors.ENDC}")
         else:
-            if api_key and api_key not in key_placeholders:
-                final_key = api_key.replace(" ", "")
-                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 已从UI输入中读取API KEY.{BColors.ENDC}")
-            else:
-                print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: 配置文件和UI输入中均无有效API KEY.{BColors.ENDC}")
-                raise RuntimeError(f"LLM_Prompt_Formatter failed: API KEY 缺失！请在 LPF_config.json 中配置")
+            print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: 配置文件和UI输入中均无有效API KEY.{BColors.ENDC}")
+            raise RuntimeError(f"LLM_Prompt_Formatter failed: API KEY 缺失！请在 LPF_config.json 中配置")
 
         if config_url and config_url not in url_placeholders:
             final_url = config_url.replace(" ", "")
             print(f"[LLM_Prompt_Formatter]: 已从配置文件中读取API URL: {final_url}.")
+        elif api_url and api_url not in url_placeholders:
+            final_url = api_url.replace(" ", "")
+            print(f"[LLM_Prompt_Formatter]: 已从UI输入中读取API URL: {final_url}.")
         else:
-            if api_url and api_url not in url_placeholders:
-                final_url = api_url.replace(" ", "")
-                print(f"[LLM_Prompt_Formatter]: 已从UI输入中读取API URL: {final_url}.")
-            else:
-                print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: 配置文件和UI输入中均无有效API URL.{BColors.ENDC}")
-                raise RuntimeError(f"LLM_Prompt_Formatter failed: API URL 缺失！请在 LPF_config.json 中配置")
+            print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: 配置文件和UI输入中均无有效API URL.{BColors.ENDC}")
+            raise RuntimeError(f"LLM_Prompt_Formatter failed: API URL 缺失！请在 LPF_config.json 中配置")
 
+        return final_key, final_url
+
+    @staticmethod
+    def _build_normal_config(mode, config, api_url, model_name):
+        """构建普通模式（非 Agent）的提示词配置。
+        Returns (system_content, fewshot_user, fewshot_assistant, gemma_prompt, is_anima).
+        """
         is_anima = (mode == "Anima")
-
         if is_anima:
             system_content = config.get("system_prompt_anima", "You are a helpful assistant that generates image prompts.")
             fewshot_user = config.get("fewshot_user_anima", "")
@@ -217,12 +198,120 @@ class LLM_Prompt_Formatter:
             fewshot_assistant = config.get("fewshot_assistant", "")
             print(f"[LLM_Prompt_Formatter]: 当前模式: NewBie")
 
-        jailbreaker = config.get("gemini_jailbreaker", "")
         gemma_prompt = config.get("gemma_prompt", "You are an assistant designed to generate high-quality anime images with the highest degree of image-text alignment based on xml format textual prompts. <Prompt Start>\n")
 
+        # Gemini 强力破甲
+        jailbreaker = config.get("gemini_jailbreaker", "")
         if (not 'googleapis' in api_url) and ('gemini' in model_name.lower()) and jailbreaker:
             print(f"[LLM_Prompt_Formatter]: 已启用Gemini强力破甲。")
             system_content = f"{jailbreaker}{system_content}"
+
+        return system_content, fewshot_user, fewshot_assistant, gemma_prompt, is_anima
+
+    @staticmethod
+    def _build_normal_messages(system_content, fewshot_user, fewshot_assistant, user_text, image):
+        """构建普通模式的完整消息列表（含图片）。"""
+        messages_content = [{"type": "text", "text": user_text}]
+        if image is not None:
+            print(f"[LLM_Prompt_Formatter]: 检测到图片输入，正在转换...")
+            base64_image = utils.tensor_to_base64(image)
+            messages_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+            })
+        if fewshot_assistant and fewshot_user:
+            print("[LLM_Prompt_Formatter]: 已成功应用用户few-shot设置。\n")
+            return [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": fewshot_user},
+                {"role": "assistant", "content": fewshot_assistant},
+                {"role": "user", "content": messages_content},
+            ]
+        return [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": messages_content},
+        ]
+
+    @staticmethod
+    def _extract_reasoning(response, full_response, thinking):
+        """从 LLM 响应中提取思考/推理内容。
+        Returns (full_response, reasoning).
+        注：会从 full_response 中移除 <think> 标签内容。
+        """
+        reasoning = ""
+        found_thinking = False
+
+        # 方式 1：reasoning 属性（部分平台）
+        if hasattr(response.choices[0].message, 'reasoning') and response.choices[0].message.reasoning:
+            reasoning = response.choices[0].message.reasoning
+            found_thinking = True
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+        if hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
+            reasoning = response.choices[0].message.reasoning_content
+            found_thinking = True
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+
+        # 方式 2：<think> 标签（DeepSeek R1 等）
+        match = re.search(r'<think>(.*?)</think>', full_response, re.DOTALL)
+        if match:
+            found_thinking = True
+            reasoning = match.group(1)
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+            full_response = re.sub(r'<think>(.*?)</think>', "", full_response, flags=re.DOTALL).strip()
+
+        if thinking and not found_thinking:
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:虽然您开启了思考开关，但是未解析到思考内容。{BColors.ENDC}")
+        if (not full_response) and reasoning:
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:模型未返回结果但检测到思考内容，以思考内容作为结果。{BColors.ENDC}")
+            full_response = reasoning
+
+        return full_response, reasoning
+
+    @staticmethod
+    def _parse_normal_output(full_response, is_anima, gemma_prompt):
+        """解析普通模式的 LLM 输出。
+        Anima: 中英文分离。NewBie: 三级 XML 提取策略。
+        """
+        if is_anima:
+            xml_content, text_content = utils.split_by_language(full_response)
+            if not xml_content:
+                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: Anima模式未检测到英文内容，返回完整响应。{BColors.ENDC}")
+                xml_content = full_response
+            return xml_content, text_content
+
+        # NewBie mode: 严格错误处理
+        if "```" not in full_response and "<img>" not in full_response:
+            print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: 大模型的回复中未检测到<img>标签。以下是大模型的回复：\n {full_response} {BColors.ENDC}")
+            raise ValueError("LLM API 的回复中未检测到<img>标签。")
+        if "```" not in full_response and "<img>" in full_response and "</img>" not in full_response:
+            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 大模型的回复可能被截断。以下是大模型的回复：\n {full_response} {BColors.ENDC}")
+            raise ValueError("LLM API 的回复可能被截断。")
+
+        xml_content, text_content = utils.parse_newbie_content(full_response)
+        xml_content = utils.clean_prompt(xml_content, gemma_prompt)
+        return xml_content, text_content
+
+    # ── 主方法 ─────────────────────────────────────────────────────────
+
+    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, image=None):
+        config = load_api_config()
+        final_key, final_url = self._resolve_credentials(config, api_key, api_url)
+
+        # ── Agent 模式分支 ───────────────────────────────────────────
+        if agent_effort != "Close":
+            print(f"[LLM_Prompt_Formatter]: Agent 模式已启用 (effort={agent_effort})")
+            try:
+                agent = PromptAgent(
+                    api_key=final_key, api_url=final_url, model_name=model_name,
+                    mode=mode, thinking=thinking, config=config, effort=agent_effort,
+                )
+                return agent.run(user_text, image=image)
+            except Exception as e:
+                print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: Agent 模式失败: {e}，回退为普通模式{BColors.ENDC}")
+
+        # ── 普通模式 ─────────────────────────────────────────────────
+        system_content, fewshot_user, fewshot_assistant, gemma_prompt, is_anima = \
+            self._build_normal_config(mode, config, final_url, model_name)
 
         try:
             if not final_key or final_key == "sk-...":
@@ -230,115 +319,39 @@ class LLM_Prompt_Formatter:
                 raise RuntimeError(f"LLM_Prompt_Formatter failed: API KEY 缺失！请在 LPF_config.json 中配置")
 
             client = OpenAI(api_key=final_key, base_url=final_url)
-
-            messages_content = [{"type": "text", "text": user_text}]
-
-            if image is not None:
-                print(f"[LLM_Prompt_Formatter]: 检测到图片输入，正在转换...")
-                base64_image = self.tensor_to_base64(image)
-                messages_content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                })
+            messages_list = self._build_normal_messages(
+                system_content, fewshot_user, fewshot_assistant, user_text, image
+            )
 
             extra_body = self.get_platform_settings(final_url, model_name, thinking)
             max_retries = 3
 
-            if fewshot_assistant and fewshot_user:
-                messages_list = [
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": fewshot_user},
-                    {"role": "assistant", "content": fewshot_assistant},
-                    {"role": "user", "content": messages_content}
-                ]
-                print("[LLM_Prompt_Formatter]: 已成功应用用户few-shot设置。\n")
-            else:
-                messages_list = [
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": messages_content}
-                ]
-
             for attempt in range(max_retries + 1):
                 try:
                     response = client.chat.completions.create(
-                        model=model_name,
-                        messages=messages_list,
-                        temperature=0.7,
-                        extra_body=extra_body,
+                        model=model_name, messages=messages_list,
+                        temperature=0.7, extra_body=extra_body,
                     )
                     usage = response.usage
-                    token_info = f"Tokens: {usage.prompt_tokens} tokens input + {usage.completion_tokens} tokens output = {usage.total_tokens} tokens used."
-                    print(f"[LLM_Prompt_Formatter]: {token_info}")
+                    print(f"[LLM_Prompt_Formatter]: Tokens: {usage.prompt_tokens} input + {usage.completion_tokens} output = {usage.total_tokens} used.")
                     full_response = response.choices[0].message.content
 
-                    reasoning_present = False
-                    if hasattr(response.choices[0].message, 'reasoning') and response.choices[0].message.reasoning:
-                        reasoning_present = True
-                    if hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
-                        reasoning_present = True
-
+                    # 检查响应是否为空
+                    reasoning_present = (
+                        hasattr(response.choices[0].message, 'reasoning') and response.choices[0].message.reasoning
+                    ) or (
+                        hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content
+                    )
                     if full_response is None:
                         if not reasoning_present:
                             raise ValueError("LLM API 返回了 NoneType (返回内容为空)。")
                         full_response = ""
 
-                    reasoning = ""
-                    found_thinking = False
-                    if hasattr(response.choices[0].message, 'reasoning') and response.choices[0].message.reasoning:
-                        reasoning = response.choices[0].message.reasoning
-                        found_thinking = True
-                        print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
-                    if hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
-                        reasoning = response.choices[0].message.reasoning_content
-                        found_thinking = True
-                        print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
+                    # 提取思考/推理内容
+                    full_response, _reasoning = self._extract_reasoning(response, full_response, thinking)
 
-                    match = re.search(r'<think>(.*?)</think>', full_response, re.DOTALL)
-                    if match:
-                        found_thinking = True
-                        reasoning = match.group(1)
-                        print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:大模型已进行深度思考，以下是思考内容：\n {reasoning} {BColors.ENDC}")
-                        full_response = re.sub(r'<think>(.*?)</think>', "", full_response, flags=re.DOTALL).strip()
-
-                    if thinking and not found_thinking:
-                        print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:虽然您开启了思考开关，但是未解析到思考内容。{BColors.ENDC}")
-                    if (not full_response) and reasoning:
-                        print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:模型未返回结果但检测到思考内容，以思考内容作为结果。{BColors.ENDC}")
-                        full_response = reasoning
-
-                    if is_anima:
-                        xml_content, text_content = split_by_language(full_response)
-                        if not xml_content:
-                            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: Anima模式未检测到英文内容，返回完整响应。{BColors.ENDC}")
-                            xml_content = full_response
-                        return (xml_content, text_content)
-
-                    # NewBie mode: existing XML parsing logic
-                    match = re.search(r"```(?:xml)?\s*(.*?)\s*```", full_response, re.DOTALL)
-                    if match:
-                        xml_content = match.group(1).strip()
-                        text_content = full_response.replace(match.group(0), "").strip()
-                    else:
-                        print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 解析代码块失败，正在尝试进一步分离{BColors.ENDC}")
-                        if "<img>" in full_response and "</img>" in full_response:
-                            start = full_response.find("<img>")
-                            end = full_response.rfind("</img>") + 6
-                            xml_content = full_response[start:end]
-                            text_content = full_response[:start] + full_response[end:]
-                        elif "<img>" in full_response:
-                            start = full_response.find("<img>")
-                            xml_content = full_response[start:]
-                            text_content = ""
-                            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 大模型的回复可能被截断。以下是大模型的回复：\n {full_response} {BColors.ENDC}")
-                            raise ValueError("LLM API 的回复可能被截断。")
-                        else:
-                            xml_content = full_response
-                            text_content = ""
-                            print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: 大模型的回复中未检测到<img>标签。以下是大模型的回复：\n {full_response} {BColors.ENDC}")
-                            raise ValueError("LLM API 的回复中未检测到<img>标签。")
-
-                    xml_content = clean_prompt(xml_content, gemma_prompt)
-                    return (xml_content, text_content)
+                    # 解析输出
+                    return self._parse_normal_output(full_response, is_anima, gemma_prompt)
 
                 except Exception as inner_e:
                     err_msg = str(inner_e).lower()
@@ -355,60 +368,7 @@ class LLM_Prompt_Formatter:
             raise RuntimeError(f"LLM_Prompt_Formatter failed: {str(e)}") from e
 
 
-def clean_prompt(xml_content, gemma_prompt):
-    header = gemma_prompt
-    match = re.search(r'(<img>.*?</img>)', xml_content, re.DOTALL | re.IGNORECASE)
-    if not match:
-        print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: LLM返回结果匹配失败，请检查输出结果，必要时停止工作流。{BColors.ENDC}")
-        xml_content = repair_xml_custom(xml_content)
-        return xml_content
-    xml_part = match.group(1)
-    xml_part = repair_xml_custom(xml_part)
-    return f"{header}\n{xml_part}"
-
-
-def repair_xml_custom(xml_string):
-    if not xml_string.strip():
-        return xml_string
-
-    strict_parser = etree.XMLParser(remove_blank_text=True)
-    recover_parser = etree.XMLParser(recover=True, remove_blank_text=True)
-
-    try:
-        etree.fromstring(xml_string.encode('utf-8'), parser=strict_parser)
-        print("[LLM_Prompt_Formatter]:已完成xml格式检查，无错误。")
-        return xml_string
-    except etree.XMLSyntaxError:
-        try:
-            root = etree.fromstring(xml_string.encode('utf-8'), parser=recover_parser)
-            if root is None:
-                raise ValueError("无法解析出任何有效结构")
-
-            repaired_xml = etree.tostring(
-                root,
-                encoding='unicode',
-                pretty_print=True,
-                xml_declaration=False
-            ).strip()
-
-            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]:检测到xml格式错误，已自动修复。差异如下：{BColors.ENDC}")
-            orig_lines = [line.strip() for line in xml_string.splitlines() if line.strip()]
-            new_lines = [line.strip() for line in repaired_xml.splitlines() if line.strip()]
-            diff = difflib.unified_diff(orig_lines, new_lines, fromfile='Original', tofile='Repaired', lineterm='', n=0)
-
-            has_diff = False
-            for line in diff:
-                if line.startswith(('+', '-')) and not line.startswith(('+++', '---')):
-                    print(line)
-                    has_diff = True
-
-            if not has_diff:
-                print("(仅修复了微小的空白符或内部编码格式)")
-
-            print("-" * 30)
-            return repaired_xml
-
-        except Exception as e:
-            print(f"{BColors.FAIL}[LLM_Prompt_Formatter]:XML 损坏严重，无法修复！必要时请停止工作流。\n错误详情: {e}{BColors.ENDC}")
-            print("-" * 30)
-            return xml_string
+# 以下函数已迁移至 prompt_agent.utils:
+#   - split_by_language
+#   - clean_prompt
+#   - repair_xml_custom

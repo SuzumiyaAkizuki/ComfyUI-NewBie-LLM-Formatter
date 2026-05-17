@@ -6,11 +6,46 @@
 
 ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202602100940021.png)
 
-利用大语言模型 API 将自然语言或图片自动转化为适用于 NewBie 模型的结构化 XML 提示词，或适用于 Anima 等其他模型的纯文本提示词。通过提供高度健壮的提示词生成与画面风格管理节点，显著提升了图像生成流程的效率与效果。
+利用大语言模型 API 将自然语言或图片自动转化为适用于 NewBie 模型的结构化 XML 提示词，或适用于 Anima 等其他模型的纯文本提示词。
+
+---
+
+## Agent 模式（v1.2.9 新增）
+
+传统模式下，LLM 只能凭训练记忆生成标签，容易产生幻觉（编造不存在的标签）或遗漏关键属性。**Agent 模式**让 LLM 在生成提示词的过程中调用[DanbooruSearchOnline](https://huggingface.co/spaces/SAkizuki/DanbooruSearch)的MCP服务，**实时搜索 Danbooru 标签库**，像人类一样查找、验证、补充标签，最终输出一套精确、完整的提示词。
+
+### 具体行为
+
+- **自动搜索标签**：根据你的描述，自动在 Danbooru 标签库中搜索匹配的发型、服装、表情、场景等标签。
+- **关联扩展**：从搜索结果出发，沿标签共现图谱自动发现你可能没想到的补充标签。
+- **智能组装**：将搜索到的标签按规范格式整理输出（NewBie 模式为 XML，Anima 模式为 `## Prompt` + `## 中文解释`）。
+- **尊重已有标签**：如果你已经在输入中提供了标签，Agent 会直接信任并使用，不会重复搜索。
+
+### 使用方法
+
+在 LLM Xml Prompt Formatter 节点中找到 `agent_effort` 下拉框，选择努力等级：
+
+| 等级 | 说明 | 适用场景 |
+|------|------|---------|
+| **Close** | 关闭 Agent，走传统单轮 LLM 调用 | 已有完整标签、追求速度 |
+| **Low** | 流水线模式：一次批量搜索 + LLM 直接组装，1 轮完成 | 追求最快速度，场景不复杂 |
+| **Medium** | Agent 循环模式：多轮迭代搜索，最多 8 轮 | 日常使用，速度与质量平衡 |
+| **High** | Agent 循环模式：宽召回 + 深探索，最多 10 轮 | 复杂场景、多人物、追求极致精度 |
+
+> **建议**：日常使用选 **Medium**；输入已经是完整的标签串时选 **Close**（或 **Low**，会自动识别并 1 轮直出）；复杂多人场景选 **High**。
+
+### 效率提示
+
+- 如果你已经有一组标签，直接在输入框粘贴（逗号分隔），Agent 会识别并跳过搜索，1 轮完成。
+- 混合输入（标签 + 自然语言描述）会只搜索自然语言部分涉及的维度，不会浪费轮次。
+- 控制台会显示 `[Agent]` 前缀的详细日志，可以观察每轮的搜索内容和 Token 消耗。
+
+---
 
 本插件的核心特性有：
 
-- **双模式支持**：NewBie 模式生成结构化 XML 提示词；Anima 模式生成纯文本提示词（质量词 + 标签 + 自然语言描述），两种模式可在节点内无缝切换。
+- **Agent 智能搜索**（v1.2.9 新增）：生成提示词时自动搜索 Danbooru 标签库，验证和补充标签，消除 LLM 幻觉。四级努力控制（Low / Medium / High），在速度与精度间灵活选择。
+- **双模式支持**：NewBie 模式生成结构化 XML 提示词；Anima 模式生成 `## Prompt` + `## 中文解释` 格式提示词，两种模式可在节点内无缝切换。
 - **智能提示词转化**：支持将简单的自然语言、Danbooru 标签串，完美转化为目标模型所需的提示词格式。
 - **多模态视觉反推**：支持传入图片，利用多模态大模型直接反推生成高精度提示词。
 - **高鲁棒性与自动修复**：内置 XML 语法解析与自动修复机制，外加 API 网络异常/格式异常自动重试逻辑（最高 3 次），确保工作流不中断。
@@ -81,22 +116,26 @@ comfy node install NewBie-LLM-Formatter
 | `fewshot_user` | `string` | **NewBie模式**Few-shot 注入功能：此字段为注入的一轮对话中「用户」的内容。与 `fewshot_assistant` 同时填写时生效。 |
 | `fewshot_assistant` | `string` | **NewBie模式**Few-shot 注入功能：此字段为注入的一轮对话中「AI」的回复内容。可用于增强模型在特定方面的输出能力。 |
 | `gemma_prompt` | `string` | 拼接在 **NewBie 模式** XML 输出前的固定引导词，用于指导 NewBie 模型（Gemma3 4B）理解提示词格式。通常无需修改。Anima 模式下不使用此字段。 |
-| `system_prompt_anima` | `string` | **Anima 模式**发送给 LLM 的系统提示词。需要指导模型输出格式为：第一行质量词、第二行有含义的标签、第三行英文自然语言描述、第四行中文描述（作为 `text_out` 输出）。 |
-| `fewshot_user_anima` | `string` | **Anima模式**Few-shot 注入功能。与 `fewshot_assistant_anima` 同时填写时生效。 |
-| `fewshot_assistant_anima` | `string` | **Anima模式**Few-shot 注入功能。 |
+| `system_prompt_anima` | `string` | **Anima 模式**发送给 LLM 的系统提示词。指导模型输出 `## Prompt`（标签块 + 英文自然语言段落）+ `## 中文解释`（分点设计说明）的 Markdown 标题结构。 |
+| `fewshot_user_anima` | `string` | **Anima模式**Few-shot 注入功能。示例用户输入应包含标签 + 自然语言描述。与 `fewshot_assistant_anima` 同时填写时生效。 |
+| `fewshot_assistant_anima` | `string` | **Anima模式**Few-shot 注入功能。示例 AI 回复应为 `## Prompt`（标签块 + 英文 NL）+ `## 中文解释` 格式。 |
 | `artists_anima` | `string` | **Anima模式**参考画师列表，指导LLM选择合适的画师。可以在[这个视频](https://www.bilibili.com/video/BV1Q1w1zKEwk)或者[这个链接](https://drive.google.com/file/d/1CtcODfWbDl8KThORS0GHZfcWKCCMUUmD/view)中下载对应的内容。为保护作者的知识产权，这里不提供对应的文本。 |
 | `styles` | `object` | 预设风格提示词集合，供 XML Style Injector 节点使用。可通过 Style Preset Saver 节点或直接编辑此文件来添加风格。 |
 
 ### Anima 模式提示词格式
 
-`system_prompt_anima`要求 LLM 输出以换行分隔的四段内容
+`system_prompt_anima` 要求 LLM 输出 `## Prompt` + `## 中文解释` 的 Markdown 标题结构：
 
 ```
-Line 1: quality and aesthetic tags (e.g. masterpiece, score_9, ...)
-Line 2: subject and scene tags (e.g. 1girl, white_hair, ...)
-Line 3: English natural language description
-Line 4: 中文自然语言描述（将作为 text_out 输出）
+## Prompt
+[标签块：Danbooru 风格 tag，逗号分隔，单行]
+[自然语言段落：2~3 句英文，描述构图、光线、氛围、背景]
+
+## 中文解释
+[分点说明该提示词的设计逻辑和标签选择理由]
 ```
+
+Agent 模式下遵循同样的输出格式。普通模式（非 Agent）下也使用此格式，`xml_out` 返回 `## Prompt` 下的内容，`text_out` 返回 `## 中文解释` 下的内容。
 
 ### Few-shot 注入的请求体结构
 
@@ -142,15 +181,16 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | `api_url` | STRING | API 主机地址。若配置文件中已有有效值，此处输入不生效。 |
 | `model_name` | STRING/下拉框 | 模型名称。若配置文件中的 `model_list` 有效，显示为下拉框；否则显示为文本输入框。 |
 | `mode` | 下拉框 | **NewBie**（默认）或 **Anima**。决定使用哪套 system prompt 以及输出解析方式。 |
-| `thinking` | BOOLEAN | 深度思考模式开关。`true` 时模型进行深度思考，思考过程输出到控制台。**推荐设置为 `false`。** |
+| `thinking` | BOOLEAN | 深度思考模式开关。`true` 时模型进行深度思考，思考过程输出到控制台。**推荐设置为 `false`。** Agent 模式下此开关被强制关闭。 |
+| `agent_effort` | 下拉框 | **[v1.9.9 新增]** Agent 努力等级。`Close`（默认）= 关闭 Agent，走普通模式；`Low` = 流水线模式（单轮批量搜索 + LLM 组装，不走 Agent 循环，最快）；`Medium` = Agent 循环模式（多轮工具调用，每轮 top_k=5，最多 8 轮）；`High` = Agent 循环模式（宽召回 top_k=10，最多 10 轮，最深入）。 |
 | `user_text` | STRING | 待转换的自然语言描述或标签集。 |
 
 **输出参数：**
 
 | 参数 | 说明 |
 |------|------|
-| `xml_out` | NewBie 模式：清洗并修复后的 XML 格式提示词。Anima 模式：LLM 输出中所有英文内容（质量词 + 标签 + 英文描述）。 |
-| `text_out` | NewBie 模式：LLM 输出的 XML 代码块以外的额外说明信息。Anima 模式：LLM 输出中所有中文内容（通常为中文描述）。 |
+| `xml_out` | NewBie 模式：清洗并修复后的 XML 格式提示词。Anima 模式：`## Prompt` 标题下的内容（标签块 + 英文自然语言段落）。 |
+| `text_out` | NewBie 模式：LLM 输出的 XML 代码块以外的额外说明信息。Anima 模式：`## 中文解释` 标题下的分点设计说明。 |
 
 **两种模式的行为差异：**
 
@@ -158,13 +198,16 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 |------|------------|-----------|
 | 使用的 system prompt | `system_prompt` | `system_prompt_anima` |
 | `gemma_prompt` 前缀 | 拼接到输出前 | 不使用 |
-| 输出解析 | 提取 XML 代码块，校验并修复格式 | 按行分离中英文，英文→`xml_out`，中文→`text_out` |
+| 输出解析 | 提取 XML 代码块，校验并修复格式 | 提取 `## Prompt` 和 `## 中文解释` 两个 Markdown 标题段 |
 | XML 自动修复 | 启用 | 不启用 |
+| Agent 模式 | 多轮工具搜索 → XML 输出 | 多轮工具搜索 → `## Prompt` + `## 中文解释` 输出 |
 
 **内置鲁棒性机制：**
 
 - **自动重试**：遇到网络抖动或 API 报错时，最多自动重试 3 次。
 - **XML 自动修复**（仅 NewBie 模式）：使用 `lxml` 库对 LLM 输出的 XML 进行格式校验；若检测到格式错误，会自动修复并在控制台打印差异对比。
+- **Agent 自动降级**：Agent 模式下 MCP 服务不可用时，自动回退为普通模式，不阻塞工作流。
+- **Agent 死循环检测**：自动检测重复工具调用，超过 3 次强制退出循环。
 
 **推荐模型（计价参考 [OpenRouter](https://openrouter.ai/)，均关闭思考模式）：**
 
@@ -177,11 +220,6 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` | 免费 | 官方宣称无审查 | 较差 | — |
 
 > **思考模式说明：** 目前适配了 OpenRouter、DeepSeek、Google AI、Anthropic 官方、Kimi、小米 MIMO 和 Vercel AI Gateway 平台。其他平台请通过模型名称控制（如用 `deepseek-chat` 代替 `deepseek-reasoner`）。
->
-> **开发者建议：**
->
-> - 强烈建议关闭思考模式。关闭时每次约消耗 3000–4000 tokens；开启时可能消耗 5000–10000 tokens，且关闭思考有时反而能提升 NSFW 效果。
-> - 不建议使用参数量不远高于 4B 的模型。NewBie 本身已内置 Gemma3 4B，Anima已内置qwen3 0.6B，使用同等量级的外部 LLM 意义不大。
 >
 > **免费额度提示：** 在 [DeepSeek 开放平台](https://platform.deepseek.com) 注册后可获赠 10 元免费额度，大约可使用 1000 次。
 
@@ -254,18 +292,21 @@ A：1girl,white_hair,blue_eyes, medium_hair, high_ponytail, small_breasts, sidel
 要求人物是萌系画风，可爱一点。
 ```
 
-**`xml_out` 示例输出（英文部分）：**
+**`xml_out` 示例输出（`## Prompt` 部分）：**
 
 ```
-masterpiece, best quality, good quality, score_9, score_8, score_7, year_2025, highres, @kantoku, @tiv, @mika_pikazo, @anmi,
-1girl, white_hair, blue_eyes, medium_hair, high_ponytail, small_breasts, sidelocks, serafuku, white_shirt, deep_blue_skirt, deep_blue_sailor_collar, short_sleeves, short_skirt, shirt_tucked_in, red_neckerchief, utility_belt, shorts_under_skirt, elbow_pads, fingerless_gloves, toned, tactical_school_uniform, fast_helmet, headset, full_body_harness, chest_harness, leg_loops, waist_belt, upper_body, close-up, straight-on, facing_viewer, confident, proud, arched_back, v_over_eye, hand_on_hip, wind_lift, abstract_background, glass_shards, blue_theme, purple_theme, graphic_background,
-An adorable girl with white hair and striking blue eyes poses confidently in her tactical sailor uniform. She stands with an arched back and one hand on her hip, making a cute "V" sign over her eye while looking directly at the viewer with a proud expression. Her high ponytail and white shirt flutter in the wind. She is equipped with a FAST helmet, headset, and a complex full-body climbing harness over her outfit. The background is a stylish and cool abstract composition featuring vibrant blue and purple glass shards and modern graphic elements.
+## Prompt
+masterpiece, best quality, score_7, safe, @kantoku, @tiv, @mika pikazo, @anmi, 1girl, white hair, blue eyes, medium hair, high ponytail, small breasts, sidelocks, serafuku, white shirt, deep blue skirt, deep blue sailor collar, short sleeves, short skirt, shirt tucked in, red neckerchief, utility belt, shorts under skirt, elbow pads, fingerless gloves, toned, tactical school uniform, fast helmet, headset, full body harness, chest harness, leg loops, waist belt, upper body, close-up, straight-on, facing viewer, confident, proud, arched back, v over eye, hand on hip, wind lift, abstract background, glass shards, blue theme, purple theme, graphic background
+An adorable girl with white hair and striking blue eyes poses confidently in her tactical sailor uniform, standing with an arched back and one hand on her hip while making a cute V sign over her eye. Her high ponytail and white shirt flutter in the wind, and she wears a FAST helmet, headset, and complex full-body climbing harness over her outfit. The background is a stylish abstract composition of vibrant blue and purple glass shards with modern graphic elements.
 ```
 
-**`text_out` 示例输出（中文部分）：**
+**`text_out` 示例输出（`## 中文解释` 部分）：**
 
 ```
-一位拥有白发和深邃蓝眸的可爱女孩穿着她的战术水手服自信地摆出姿势。她挺起胸膛，一只手叉腰，在眼睛上方比出可爱的“V”字手势，带着骄傲的神情直视观众。她的高马尾和白色衬衫在微风中飘动。她佩戴着战术头盔、耳麦，并在制服外穿着一套复杂的全身攀爬安全带。背景是一个时尚酷炫的抽象构图，充满了充满活力的蓝色和紫色玻璃碎片以及现代图形元素。
+## 中文解释
+- 标签结构：质量锚点(masterpiece, best quality, score_7, safe) → 画师(@kantoku, @tiv, @mika pikazo, @anmi) → 主体(1girl) → 角色特征(white hair, blue eyes, ...) → 服装(serafuku, ...) → 装备(fast helmet, full body harness, ...) → 构图(upper body, close-up) → 姿势表情(confident, v over eye, hand on hip) → 背景(abstract background, glass shards)。
+- 自然语言描述了角色的自信姿态、V 字手势、战术装备细节和抽象背景氛围，补充了标签无法精确表达的空间关系和画面张力。
+- 翻译：一位白发蓝眸的可爱女孩穿着战术水手服，挺起胸膛一手叉腰，在眼前比出 V 字手势，骄傲地直视观众。高马尾和衬衫在风中飘动，佩戴战术头盔和全身攀爬安全带。背景是蓝紫色玻璃碎片组成的时尚抽象构图。
 ```
 
 </details>
@@ -298,7 +339,7 @@ An adorable girl with white hair and striking blue eyes poses confidently in her
 
 **Anima 模式行为：**
 
-> 开发者笔记：适用于NewBie模型的画风串不一定适用于Anima模型。
+> 开发者笔记：适用于NewBie模型的画风串不一定适用于Anima模型。虽然我做了Anima模式的适配，但是我强烈不建议你使用。
 
 Anima 模式下的画师和风格注入逻辑：
 
@@ -369,6 +410,27 @@ Anima 模式下的画师和风格注入逻辑：
 
 <details open>
 <summary>展开/折叠更新历史</summary>
+
+### 2026年05月17日 v1.2.9 [exp]
+
+> 此版本引入了 Agent 模式，支持自动调用 Danbooru 标签搜索工具生成精确提示词。
+
+- 新增 **Agent 模式**：LLM Xml Prompt Formatter 节点新增 `agent_effort` 下拉框（Close / Low / Medium / High），启用后自动调用 Danbooru 标签搜索工具进行多轮检索。
+  - **四级努力控制**：Low（流水线模式，单轮批量搜索+LLM 组装，最快）、Medium（Agent 循环，最多 8 轮，均衡）、High（Agent 循环，最多 10 轮，最深入）。
+  - **NewBie / Anima 双模式兼容**：Agent 模式可与两种模式组合使用，输出格式不变。
+  - **Anima 输出格式升级**：Anima 模式下统一采用 `## Prompt` + `## 中文解释` Markdown 标题结构。
+  - **Anima 多人物防串扰**：新增多人场景下的特征分离策略，减少角色间发型/服装/体型混淆。
+  - **Anima 提示词规范修正**：标签分隔符改为空格（与 Anima 官方规范一致），画师使用 `@` 前缀，支持 `(tag:权重)` 语法。
+  - **MCP 工具集成**：通过 Streamable HTTP 协议调用远程 DanbooruSearch MCP Server（HF Space + MS 双端点自动切换）。
+  - **控制台 Log 输出**：Agent 调用过程（查询重写、每轮工具调用、Token 消耗）均有 `[Agent]` 前缀 Log 输出。
+  - **自动降级与容错**：MCP 服务不可用时自动回退普通模式；重复工具调用自动检测退出；Agent 异常自动降级。
+  - **轮次效率优化**：纯标签输入 1 轮直出；标签+自然语言混合输入自动划定搜索边界；支持单轮多工具并行调用。
+  - **提示词缓存**：跨 ComfyUI 会话持久化，相似输入自动复用历史标签结果。
+  - **强制关闭思考**：Agent 模式下关闭深度思考，节省 Token。
+
+- **修复**：v1.9.9 初版中 NewBie 模式缺少 else 分支导致崩溃、变量名截断等问题均已修复。
+
+- 新增依赖 `httpx`（用于 MCP Streamable HTTP 通信）。
 
 ### 2026年04月08日 v1.2.5 [exp]
 

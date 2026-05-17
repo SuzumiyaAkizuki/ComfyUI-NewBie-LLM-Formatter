@@ -1,0 +1,443 @@
+"""
+prompt_agent/tools.py
+----------------------
+search_tags / get_related_tags 工具实现，通过 MCP Streamable HTTP 协议
+调用 DanbooruSearch MCP 服务。
+
+MCP 服务地址：https://sakizuki-danboorusearch.hf.space/mcp/mcp
+协议：Streamable HTTP（POST JSON-RPC，非 SSE）
+
+依赖：
+  pip install httpx
+
+工具定义（TOOLS）在模块加载时通过 load_tools_from_mcp() 从 MCP 服务端动态拉取，
+与服务端 tools/list 响应保持一致，无需本地维护描述文本。
+拉取失败时回退到内置的 FALLBACK_TOOLS，保证服务可用性。
+
+HF Space 冷启动约 30~60 秒，_call_mcp 设置 timeout=90。
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import threading
+import time
+import httpx
+
+_MCP_URL_HF = "https://sakizuki-danboorusearch.hf.space/mcp/mcp"
+_MCP_URL_MS = "https://sakizuki-danboorusearchonline.ms.show/mcp/mcp"
+_TIMEOUT = 90
+
+# 当前活跃端点，模块启动时默认 HF；_rpc 调用失败时自动回退
+_active_url: str = _MCP_URL_HF
+
+# 保护 _active_url 并发写入
+_lock = threading.Lock()
+
+
+def get_active_endpoint() -> str:
+    """返回当前活跃的 MCP 端点标识 ('hf' / 'ms')。"""
+    return "ms" if _active_url == _MCP_URL_MS else "hf"
+
+# 回退用的工具定义，仅在 tools/list 拉取失败时使用
+_FALLBACK_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_tags",
+            "description": (
+                "Search Danbooru tags using natural language and return a ready-to-use prompt. "
+                "Chinese recommended. use_segmentation=True for multi-concept/scene "
+                "(top_k=5 prompt, top_k=80 exploration); use_segmentation=False for single-concept "
+                "precise lookup (top_k=20). Use category to filter results by tag type "
+                "(all/general/copyright/character)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query":            {"type": "string", "description": "Natural language description (Chinese recommended)."},
+                    "use_segmentation": {"type": "boolean", "description": "True for multi-concept/scene input (top_k per segment), False for single-concept (top_k as total pool)."},
+                    "top_k":            {"type": "integer", "description": "Candidates per segment (segmentation on) or total pool (segmentation off). 5 for scene prompt, 20 for precise lookup, 80 for exploration."},
+                    "limit":            {"type": "integer", "description": "Max tags returned. 80 for prompts, 20 for concept exploration, 10 for precise lookup."},
+                    "popularity_weight": {"type": "number", "description": "Tag frequency influence on ranking (0.0-1.0, default 0.15). Higher favors common tags."},
+                    "show_nsfw":        {"type": "boolean", "description": "Include NSFW tags (default True)."},
+                    "include_wiki":     {"type": "boolean", "description": "Append wiki description per tag (default False). Use for disambiguation or explaining tags."},
+                    "category":         {"type": "string", "description": "Filter results to a tag category. 'all' (default), 'general' (visual attributes/clothing/pose), 'copyright' (anime/game titles), 'character' (named characters)."},
+                },
+                "required": ["query", "use_segmentation", "top_k"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_related_tags",
+            "description": (
+                "Co-occurrence-based tag recommendations via NPMI scoring. Call after search_tags "
+                "to discover complementary tags (accessories, character features, scene atmosphere). "
+                "Multi-tag input returns intersection recommendations."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tags":         {"type": "array", "items": {"type": "string"}, "description": "Danbooru tag names to base recommendations on."},
+                    "limit":        {"type": "integer", "description": "Max recommendations returned."},
+                    "show_nsfw":    {"type": "boolean", "description": "Include NSFW tags."},
+                    "include_wiki": {"type": "boolean", "description": "Append wiki description per tag (default False). Use for disambiguation or explaining tags."},
+                },
+                "required": ["tags"],
+            },
+        },
+    },
+]
+
+
+_HEADERS_BASE = {
+    "Content-Type": "application/json",
+    "Accept":       "application/json, text/event-stream",
+}
+
+def _new_session_id(url: str | None = None) -> str:
+    """
+    发送 initialize 握手，返回服务器分配的 session id。
+    每次工具调用前重新握手，不跨请求复用——HF Space 多副本部署时
+    同一 session id 可能被路由到不同副本导致 404。
+    """
+    if url is None:
+        url = _active_url
+    payload = {
+        "jsonrpc": "2.0",
+        "id":      0,
+        "method":  "initialize",
+        "params":  {
+            "protocolVersion": "2024-11-05",
+            "clientInfo":      {"name": "prompt-agent", "version": "1.0"},
+            "capabilities":    {},
+        },
+    }
+    resp = httpx.post(
+        url,
+        json=payload,
+        headers=_HEADERS_BASE,
+        timeout=_TIMEOUT,
+    )
+    session_id = resp.headers.get("mcp-session-id")
+    if not session_id:
+        resp.raise_for_status()
+        raise RuntimeError("MCP initialize 响应中没有 mcp-session-id header")
+    return session_id
+
+
+def _parse_response(resp: httpx.Response) -> dict:
+    """
+    解析 MCP 响应，兼容两种格式：
+    - application/json：直接 resp.json()
+    - text/event-stream：从 data: 行提取第一条 JSON
+    """
+    ct = resp.headers.get("content-type", "")
+    if "text/event-stream" in ct:
+        for line in resp.text.splitlines():
+            if line.startswith("data:"):
+                return json.loads(line[5:].strip())
+        raise RuntimeError("SSE 响应中没有 data: 行")
+    return resp.json()
+
+
+def _rpc(method: str, params: dict, req_id: int = 1) -> dict:
+    """
+    握手 + 发送 JSON-RPC 请求，两步用同一个 session id 完成。
+    优先使用 _active_url，失败时自动切换到备用端点重试。
+    """
+    global _active_url
+
+    urls_to_try = [_active_url]
+    fallback = _MCP_URL_MS if _active_url == _MCP_URL_HF else _MCP_URL_HF
+    urls_to_try.append(fallback)
+
+    last_error = None
+    for url in urls_to_try:
+        try:
+            session_id = _new_session_id(url)
+            payload = {
+                "jsonrpc": "2.0",
+                "id":      req_id,
+                "method":  method,
+                "params":  params,
+            }
+            resp = httpx.post(
+                url,
+                json=payload,
+                headers={**_HEADERS_BASE, "mcp-session-id": session_id},
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
+            rpc_resp = _parse_response(resp)
+
+            if "error" in rpc_resp:
+                raise RuntimeError(rpc_resp["error"].get("message", f"{method} 返回错误"))
+
+            # 成功——如果用的不是当前活跃端点，切换过去
+            if url != _active_url:
+                tag = "ms" if url == _MCP_URL_MS else "hf"
+                print(f"[tools] 主端点不可用，已切换到 {tag.upper()} 端点", file=sys.stderr)
+                with _lock:
+                    _active_url = url
+
+            return rpc_resp.get("result", {})
+
+        except Exception as e:
+            last_error = e
+            continue
+
+    raise last_error
+
+
+def _probe(url: str, timeout: float = 20) -> dict:
+    """
+    向单个端点执行一次真实 search_tags 检索（query="1girl", top_k=5, limit=5），
+    验证 MCP 服务和后端数据库均可用。
+    返回 {"ok": bool, "latency_ms": int?, "error": str?}。
+    """
+    init_payload = {
+        "jsonrpc": "2.0",
+        "id":      0,
+        "method":  "initialize",
+        "params":  {
+            "protocolVersion": "2024-11-05",
+            "clientInfo":      {"name": "prompt-agent-health", "version": "1.0"},
+            "capabilities":    {},
+        },
+    }
+    t0 = time.monotonic()
+    try:
+        # 1. 握手拿 session id
+        init_resp = httpx.post(url, json=init_payload, headers=_HEADERS_BASE, timeout=timeout)
+        init_resp.raise_for_status()
+        session_id = init_resp.headers.get("mcp-session-id")
+        if not session_id:
+            return {"ok": False, "error": "响应中没有 mcp-session-id"}
+
+        # 2. 真实检索
+        call_payload = {
+            "jsonrpc": "2.0",
+            "id":      1,
+            "method":  "tools/call",
+            "params":  {
+                "name": "search_tags",
+                "arguments": {"query": "1girl", "use_segmentation": False, "top_k": 5, "limit": 5},
+            },
+        }
+        call_resp = httpx.post(
+            url, json=call_payload,
+            headers={**_HEADERS_BASE, "mcp-session-id": session_id},
+            timeout=timeout,
+        )
+        call_resp.raise_for_status()
+        latency = round((time.monotonic() - t0) * 1000)
+
+        rpc_resp = _parse_response(call_resp)
+        if "error" in rpc_resp:
+            return {"ok": False, "error": rpc_resp["error"].get("message", "tools/call 返回错误")}
+
+        return {"ok": True, "latency_ms": latency}
+
+    except httpx.TimeoutException:
+        return {"ok": False, "error": "超时，服务可能正在冷启动"}
+    except httpx.HTTPStatusError as e:
+        return {"ok": False, "error": f"HTTP {e.response.status_code}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def check_mcp_health(timeout: float = 15) -> dict:
+    """
+    并发检查 HF 和 MS 两个端点的健康状态。
+    返回 {"hf": {...}, "ms": {...}, "active": "hf"|"ms"}。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        hf_f = pool.submit(_probe, _MCP_URL_HF, timeout)
+        ms_f = pool.submit(_probe, _MCP_URL_MS, timeout)
+    return {"hf": hf_f.result(), "ms": ms_f.result(), "active": get_active_endpoint()}
+
+
+def load_tools_from_mcp() -> list[dict]:
+    """
+    调用 MCP tools/list，将返回的工具定义转换为 OpenAI function calling 格式。
+    拉取失败时打印警告并返回 _FALLBACK_TOOLS。
+    """
+    try:
+        result = _rpc("tools/list", {})
+        mcp_tools = result.get("tools", [])
+        if not mcp_tools:
+            raise RuntimeError("tools/list 返回的工具列表为空")
+
+        converted = []
+        for t in mcp_tools:
+            converted.append({
+                "type": "function",
+                "function": {
+                    "name":        t["name"],
+                    "description": t.get("description", ""),
+                    "parameters":  t.get("inputSchema", {"type": "object", "properties": {}}),
+                },
+            })
+
+        print(f"[tools] 已从 MCP 加载 {len(converted)} 个工具定义（每次调用独立握手）", file=sys.stderr)
+        return converted
+
+    except Exception as e:
+        print(f"[tools] tools/list 拉取失败，使用回退定义：{e}", file=sys.stderr)
+        return _FALLBACK_TOOLS
+
+
+# 懒加载：首次调用 get_tools() 时从 MCP 拉取工具定义，后续缓存
+_TOOLS_CACHE = None
+
+def get_tools():
+    """获取工具定义列表（懒加载，首次调用时从 MCP 拉取）。"""
+    global _TOOLS_CACHE
+    if _TOOLS_CACHE is None:
+        _TOOLS_CACHE = load_tools_from_mcp()
+    return _TOOLS_CACHE
+
+TOOLS = []  # 兼容旧 import，实际使用请调用 get_tools()
+
+
+def _call_mcp(tool_name: str, arguments: dict) -> dict:
+    """
+    发送 tools/call 请求，429 时指数退避重试（5s → 10s → 20s，最多 3 次）。
+    返回解析后的结果 dict，出错时返回 {"error": "..."} 。
+    """
+    retry_delays = [5, 10, 20]
+    last_error = None
+
+    for attempt in range(len(retry_delays) + 1):  # 首次 + 3 次重试
+        try:
+            result = _rpc("tools/call", {"name": tool_name, "arguments": arguments})
+
+            # MCP tools/call 结果在 result.content 里：list[{type, text}]
+            content_blocks = result.get("content", [])
+            for block in content_blocks:
+                if block.get("type") == "text":
+                    try:
+                        return json.loads(block["text"])
+                    except Exception:
+                        return {"raw": block["text"]}
+
+            return {"error": "MCP 返回内容为空"}
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and attempt < len(retry_delays):
+                delay = retry_delays[attempt]
+                print(
+                    f"[tools] 429 限流，{delay}s 后重试（第 {attempt + 1}/{len(retry_delays)} 次）…",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+                last_error = e
+                continue
+            return {"error": str(e)}
+        except httpx.TimeoutException:
+            return {"error": "请求超时，DanbooruSearch 服务可能正在冷启动，请稍后重试"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    return {"error": f"429 限流，已重试 {len(retry_delays)} 次仍失败: {str(last_error)}"}
+
+
+def execute_search_tags(
+    query: str,
+    use_segmentation: bool = True,
+    top_k: int = 5,
+    limit: int = 80,
+    popularity_weight: float = 0.15,
+    show_nsfw: bool = True,
+    include_wiki: bool = False,
+    category: str = "all",
+) -> str:
+    data = _call_mcp("search_tags", {
+        "query":             query,
+        "use_segmentation":  use_segmentation,
+        "top_k":             top_k,
+        "limit":             limit,
+        "popularity_weight": popularity_weight,
+        "show_nsfw":         show_nsfw,
+        "include_wiki":      include_wiki,
+        "category":          category,
+    })
+
+    if "error" in data:
+        return json.dumps({"found": False, "error": data["error"]}, ensure_ascii=False)
+
+    # 实际返回字段是 results，每项含 tag / cn_name / category / final_score / count / wiki(可选)
+    tags = data.get("results") or data.get("tags", [])
+    if not tags:
+        return json.dumps({"found": False, "tags": [], "prompt": ""}, ensure_ascii=False)
+
+    prompt_str = data.get("prompt") or ", ".join(t.get("tag", "") for t in tags)
+
+    # 统一输出格式，保留 LLM 有用的字段
+    normalized = []
+    for t in tags:
+        item = {
+            "tag":         t.get("tag", ""),
+            "cn_name":     t.get("cn_name", ""),
+            "category":    t.get("category", "general"),
+            "final_score": round(float(t.get("final_score", 0)), 3),
+            "count":       t.get("count", 0),
+        }
+        if include_wiki and t.get("wiki"):
+            item["wiki"] = t["wiki"]
+        normalized.append(item)
+
+    result = {"found": True, "tags": normalized, "prompt": prompt_str}
+    # 传递 keywords（实际检索关键词）
+    if data.get("keywords"):
+        result["keywords"] = data["keywords"]
+    # 传递 hint（中英文切换提示）
+    if data.get("hint"):
+        result["hint"] = data["hint"]
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+def execute_get_related_tags(
+    tags: list[str],
+    limit: int = 30,
+    show_nsfw: bool = True,
+    include_wiki: bool = False,
+) -> str:
+    if not tags:
+        return json.dumps({"found": False, "tags": [], "error": "tags 列表为空"}, ensure_ascii=False)
+
+    data = _call_mcp("get_related_tags", {
+        "tags":         tags,
+        "limit":        limit,
+        "show_nsfw":    show_nsfw,
+        "include_wiki": include_wiki,
+    })
+
+    if "error" in data:
+        return json.dumps({"found": False, "error": data["error"]}, ensure_ascii=False)
+
+    # 实际返回是一个数组，而不是 {tags: [...]}
+    related = data if isinstance(data, list) else data.get("tags", [])
+    if not related:
+        return json.dumps({"found": False, "tags": []}, ensure_ascii=False)
+
+    normalized = []
+    for t in related:
+        item = {
+            "tag":        t.get("tag", ""),
+            "cn_name":    t.get("cn_name", ""),
+            "category":   t.get("category", "general"),
+            "count":      t.get("count", 0),
+            "cooc_score": round(float(t.get("cooc_score", 0)), 3),
+            "sources":    t.get("sources", []),
+        }
+        if include_wiki and t.get("wiki"):
+            item["wiki"] = t["wiki"]
+        normalized.append(item)
+
+    return json.dumps({"found": True, "tags": normalized}, ensure_ascii=False, indent=2)

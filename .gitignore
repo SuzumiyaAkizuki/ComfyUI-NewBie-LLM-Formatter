@@ -2,3 +2,4 @@ LPF_config.json
 test.py
 .idea/
 *副本*
+.prompt_cache.json

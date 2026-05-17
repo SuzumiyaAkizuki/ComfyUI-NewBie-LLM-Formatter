@@ -2,3 +2,4 @@ openai
 lxml
 numpy
 Pillow
+httpx
