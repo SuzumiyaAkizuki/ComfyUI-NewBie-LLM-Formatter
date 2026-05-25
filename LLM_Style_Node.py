@@ -38,13 +38,11 @@ def load_styles_from_config():
 def format_anima_artists(artist_str):
     """
     Clean and convert a comma-separated artist string to @artist1, @artist2 format.
+    Anima 格式使用空格而非下划线，因此保留 tag 内部的空格，也不删除独立数字。
     Cleaning steps per artist name:
       1. Remove brackets: [], {}, ()
-      2. Remove colon-prefixed weights (e.g. :1.2, :0.93) and standalone
-         numbers/decimals surrounded by spaces or string boundaries.
-         Numbers part of a tag token (e.g. year_2024) are preserved.
-      3. Replace internal spaces with underscores (spaces near commas are
-         already stripped by the split/strip step).
+      2. Remove colon-prefixed weights (e.g. :1.2, :0.93)
+      3. Strip whitespace and prepend @.
     """
     if not artist_str.strip():
         return ""
@@ -64,10 +62,9 @@ def format_anima_artists(artist_str):
         tag = re.sub(r':\d+(\.\d+)?', '', tag)
         # Remove all remaining colons
         tag = tag.replace(':', '')
-        # Remove standalone numbers/decimals not adjacent to letters or underscores
-        tag = re.sub(r'(?<![a-zA-Z_\d])\d+(\.\d+)?(?![a-zA-Z_\d])', '', tag)
-        # Replace internal whitespace with underscores
-        tag = re.sub(r'\s+', '_', tag.strip()).strip('_')
+        # Anima 格式使用空格而非下划线，仅去除首尾空白即可
+        # 也不删除独立数字，因为 Anima artist 名称可能含数字（如 dush 1154）
+        tag = tag.strip()
         if tag:
             cleaned.append(f'@{tag}')
 
@@ -85,10 +82,12 @@ def inject_anima_style(prompt_text, artist_str, style_str):
         stripped = line.strip()
         if not stripped:
             return False
-        return bool(re.match(r'(@[\w\-.]+[,\s]*)+$', stripped))
+        # 两个逗号中间的内容就是一个完整的 artist tag，可包含空格
+        return bool(re.match(r'^@[^,\n]+(?:\s*,\s*@[^,\n]+)*$', stripped))
 
     def strip_artists_from_line(line):
-        line = re.sub(r'@[\w\-.]+', '', line)
+        # @ 开头、到逗号或行尾为止的内容就是一个 artist tag
+        line = re.sub(r'@[^,\n]+', '', line)
         line = re.sub(r'\s*,\s*,\s*', ', ', line)
         return line.strip(' ,')
 

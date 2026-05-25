@@ -14,6 +14,12 @@ MCP 服务地址：https://sakizuki-danboorusearch.hf.space/mcp/mcp
 与服务端 tools/list 响应保持一致，无需本地维护描述文本。
 拉取失败时回退到内置的 FALLBACK_TOOLS，保证服务可用性。
 
+search_tags 使用 search_mode 预设策略（v2 API）：
+  "full_scene"       — 完整场景→提示词
+  "concept_explore"  — 模糊概念探索，宽召回
+  "subject_describe" — 描述主体以匹配标签
+  "precise_lookup"   — 精确查找/拼写纠错
+
 HF Space 冷启动约 30~60 秒，_call_mcp 设置 timeout=90。
 """
 
@@ -48,24 +54,23 @@ _FALLBACK_TOOLS = [
             "name": "search_tags",
             "description": (
                 "Search Danbooru tags using natural language and return a ready-to-use prompt. "
-                "Chinese recommended. use_segmentation=True for multi-concept/scene "
-                "(top_k=5 prompt, top_k=80 exploration); use_segmentation=False for single-concept "
-                "precise lookup (top_k=20). Use category to filter results by tag type "
-                "(all/general/copyright/character)."
+                "Chinese recommended. Use search_mode to pick the preset strategy that matches your intent: "
+                "'full_scene' for complete scene → prompt (e.g. descriptions of a character in an environment), "
+                "'concept_explore' for vague concept exploration with broad recall (e.g. 'cyberpunk clothing', 'bunny ears'), "
+                "'subject_describe' for describing a specific subject to find matching tags (e.g. 'blue-haired pilot from EVA'), "
+                "'precise_lookup' for precise lookup or spell fix (e.g. 'serafuku', 'thighhigh'). "
+                "Use category to filter results by tag type (all/general/copyright/character)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query":            {"type": "string", "description": "Natural language description (Chinese recommended)."},
-                    "use_segmentation": {"type": "boolean", "description": "True for multi-concept/scene input (top_k per segment), False for single-concept (top_k as total pool)."},
-                    "top_k":            {"type": "integer", "description": "Candidates per segment (segmentation on) or total pool (segmentation off). 5 for scene prompt, 20 for precise lookup, 80 for exploration."},
-                    "limit":            {"type": "integer", "description": "Max tags returned. 80 for prompts, 20 for concept exploration, 10 for precise lookup."},
-                    "popularity_weight": {"type": "number", "description": "Tag frequency influence on ranking (0.0-1.0, default 0.15). Higher favors common tags."},
-                    "show_nsfw":        {"type": "boolean", "description": "Include NSFW tags (default True)."},
-                    "include_wiki":     {"type": "boolean", "description": "Append wiki description per tag (default False). Use for disambiguation or explaining tags."},
-                    "category":         {"type": "string", "description": "Filter results to a tag category. 'all' (default), 'general' (visual attributes/clothing/pose), 'copyright' (anime/game titles), 'character' (named characters)."},
+                    "query":       {"type": "string", "description": "Natural language description (Chinese recommended)."},
+                    "search_mode": {"type": "string", "description": "Preset strategy: 'full_scene' (scene→prompt), 'concept_explore' (broad recall), 'subject_describe' (subject matching), 'precise_lookup' (spell fix). Default 'full_scene'."},
+                    "category":    {"type": "string", "description": "Filter results to a tag category. 'all' (default), 'general' (visual attributes/clothing/pose), 'copyright' (anime/game titles), 'character' (named characters)."},
+                    "show_nsfw":   {"type": "boolean", "description": "Include NSFW tags (default True)."},
+                    "include_wiki":{"type": "boolean", "description": "Append wiki description per tag (default False). Use for disambiguation or explaining tags."},
                 },
-                "required": ["query", "use_segmentation", "top_k"],
+                "required": ["query"],
             },
         },
     },
@@ -195,7 +200,7 @@ def _rpc(method: str, params: dict, req_id: int = 1) -> dict:
 
 def _probe(url: str, timeout: float = 20) -> dict:
     """
-    向单个端点执行一次真实 search_tags 检索（query="1girl", top_k=5, limit=5），
+    向单个端点执行一次真实 search_tags 检索（query="1girl", search_mode="precise_lookup"），
     验证 MCP 服务和后端数据库均可用。
     返回 {"ok": bool, "latency_ms": int?, "error": str?}。
     """
@@ -225,7 +230,7 @@ def _probe(url: str, timeout: float = 20) -> dict:
             "method":  "tools/call",
             "params":  {
                 "name": "search_tags",
-                "arguments": {"query": "1girl", "use_segmentation": False, "top_k": 5, "limit": 5},
+                "arguments": {"query": "1girl", "search_mode": "precise_lookup"},
             },
         }
         call_resp = httpx.post(
@@ -349,57 +354,24 @@ def _call_mcp(tool_name: str, arguments: dict) -> dict:
 
 def execute_search_tags(
     query: str,
-    use_segmentation: bool = True,
-    top_k: int = 5,
-    limit: int = 80,
-    popularity_weight: float = 0.15,
+    search_mode: str = "full_scene",
+    category: str = "all",
     show_nsfw: bool = True,
     include_wiki: bool = False,
-    category: str = "all",
 ) -> str:
+    """调用 MCP search_tags，直接透传服务端返回的原始 JSON 字符串。"""
     data = _call_mcp("search_tags", {
-        "query":             query,
-        "use_segmentation":  use_segmentation,
-        "top_k":             top_k,
-        "limit":             limit,
-        "popularity_weight": popularity_weight,
-        "show_nsfw":         show_nsfw,
-        "include_wiki":      include_wiki,
-        "category":          category,
+        "query":        query,
+        "search_mode":  search_mode,
+        "category":     category,
+        "show_nsfw":    show_nsfw,
+        "include_wiki": include_wiki,
     })
 
     if "error" in data:
-        return json.dumps({"found": False, "error": data["error"]}, ensure_ascii=False)
+        return json.dumps({"error": data["error"]}, ensure_ascii=False)
 
-    # 实际返回字段是 results，每项含 tag / cn_name / category / final_score / count / wiki(可选)
-    tags = data.get("results") or data.get("tags", [])
-    if not tags:
-        return json.dumps({"found": False, "tags": [], "prompt": ""}, ensure_ascii=False)
-
-    prompt_str = data.get("prompt") or ", ".join(t.get("tag", "") for t in tags)
-
-    # 统一输出格式，保留 LLM 有用的字段
-    normalized = []
-    for t in tags:
-        item = {
-            "tag":         t.get("tag", ""),
-            "cn_name":     t.get("cn_name", ""),
-            "category":    t.get("category", "general"),
-            "final_score": round(float(t.get("final_score", 0)), 3),
-            "count":       t.get("count", 0),
-        }
-        if include_wiki and t.get("wiki"):
-            item["wiki"] = t["wiki"]
-        normalized.append(item)
-
-    result = {"found": True, "tags": normalized, "prompt": prompt_str}
-    # 传递 keywords（实际检索关键词）
-    if data.get("keywords"):
-        result["keywords"] = data["keywords"]
-    # 传递 hint（中英文切换提示）
-    if data.get("hint"):
-        result["hint"] = data["hint"]
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 def execute_get_related_tags(
@@ -408,8 +380,9 @@ def execute_get_related_tags(
     show_nsfw: bool = True,
     include_wiki: bool = False,
 ) -> str:
+    """调用 MCP get_related_tags，直接透传服务端返回的原始 JSON 字符串。"""
     if not tags:
-        return json.dumps({"found": False, "tags": [], "error": "tags 列表为空"}, ensure_ascii=False)
+        return json.dumps({"error": "tags 列表为空"}, ensure_ascii=False)
 
     data = _call_mcp("get_related_tags", {
         "tags":         tags,
@@ -419,25 +392,6 @@ def execute_get_related_tags(
     })
 
     if "error" in data:
-        return json.dumps({"found": False, "error": data["error"]}, ensure_ascii=False)
+        return json.dumps({"error": data["error"]}, ensure_ascii=False)
 
-    # 实际返回是一个数组，而不是 {tags: [...]}
-    related = data if isinstance(data, list) else data.get("tags", [])
-    if not related:
-        return json.dumps({"found": False, "tags": []}, ensure_ascii=False)
-
-    normalized = []
-    for t in related:
-        item = {
-            "tag":        t.get("tag", ""),
-            "cn_name":    t.get("cn_name", ""),
-            "category":   t.get("category", "general"),
-            "count":      t.get("count", 0),
-            "cooc_score": round(float(t.get("cooc_score", 0)), 3),
-            "sources":    t.get("sources", []),
-        }
-        if include_wiki and t.get("wiki"):
-            item["wiki"] = t["wiki"]
-        normalized.append(item)
-
-    return json.dumps({"found": True, "tags": normalized}, ensure_ascii=False, indent=2)
+    return json.dumps(data, ensure_ascii=False, indent=2)

@@ -88,13 +88,13 @@ def _split_by_language(text):
 
 
 # Effort 级别配置
-# Low   = 流水线模式，不走 Agent 循环，无 max_rounds
-# Medium = Agent 循环，top_k=5 平衡召回质量与轮次收敛速度
-# High   = Agent 循环，top_k=10 宽召回，更多轮次深入探索
+# Low   = 流水线模式，不走 Agent 循环，用 full_scene 批量搜索
+# Medium = Agent 循环，默认 full_scene 平衡召回质量与轮次收敛速度
+# High   = Agent 循环，默认 concept_explore 宽召回，更多轮次深入探索
 _EFFORT_CONFIG = {
-    "Low":    {"search_limit": 80, "related_limit": 50, "search_top_k": 8},
-    "Medium": {"search_limit": 60, "related_limit": 30, "max_rounds": 8,  "search_top_k": 5},
-    "High":   {"search_limit": 80, "related_limit": 50, "max_rounds": 10, "search_top_k": 10},
+    "Low":    {"search_mode": "full_scene",      "related_limit": 50},
+    "Medium": {"search_mode": "full_scene",      "related_limit": 30, "max_rounds": 8},
+    "High":   {"search_mode": "concept_explore", "related_limit": 50, "max_rounds": 10, "include_wiki": True},
 }
 
 
@@ -166,21 +166,15 @@ class PromptAgent:
 
     def _execute_tool(self, name, args):
         if name == "search_tags":
-            args["limit"] = min(int(args.get("limit", 80)), self._effort_cfg["search_limit"])
-            top_k_cap = self._effort_cfg.get("search_top_k")
-            if top_k_cap is not None:
-                args["top_k"] = min(int(args.get("top_k", 5)), top_k_cap)
-            elif not args.get("use_segmentation", True):
-                args["top_k"] = min(int(args.get("top_k", 20)), args["limit"])
+            # 若 LLM 未指定 search_mode / include_wiki，使用当前 effort 级别的默认值
+            default_mode = self._effort_cfg.get("search_mode", "full_scene")
+            default_wiki = self._effort_cfg.get("include_wiki", False)
             return execute_search_tags(
-                query=args.get("query", ""),
-                use_segmentation=bool(args.get("use_segmentation", True)),
-                top_k=int(args.get("top_k", 5)),
-                limit=int(args.get("limit", 80)),
-                popularity_weight=float(args.get("popularity_weight", 0.15)),
-                show_nsfw=bool(args.get("show_nsfw", True)),
-                include_wiki=bool(args.get("include_wiki", False)),
+                query=str(args.get("query", "")),
+                search_mode=str(args.get("search_mode", default_mode)),
                 category=str(args.get("category", "all")),
+                show_nsfw=bool(args.get("show_nsfw", True)),
+                include_wiki=bool(args.get("include_wiki", default_wiki)),
             )
         elif name == "get_related_tags":
             args["limit"] = min(int(args.get("limit", 30)), self._effort_cfg["related_limit"])
@@ -202,9 +196,9 @@ class PromptAgent:
     def _log_tool_call(self, name, args):
         if name == "search_tags":
             query_str = args.get("query", "")
-            params = f"top_k={args.get('top_k', 5)}, limit={args.get('limit', 80)}, segmentation={args.get('use_segmentation', True)}"
+            mode = args.get("search_mode", "full_scene")
             _log(f"  > 搜索标签：{query_str}", _C.GREEN)
-            _log(f"    [search_tags] {params}")
+            _log(f"    [search_tags] mode={mode}, category={args.get('category', 'all')}")
         elif name == "get_related_tags":
             tags = args.get("tags", [])
             if isinstance(tags, str):
@@ -220,8 +214,9 @@ class PromptAgent:
     def _log_tool_result(self, name, result_str):
         try:
             data = json.loads(result_str)
-            if data.get("found"):
-                _log(f"    找到 {len(data.get('tags', []))} 个标签", _C.GREEN)
+            results = data.get("results", [])
+            if results:
+                _log(f"    找到 {len(results)} 个标签", _C.GREEN)
             elif data.get("error"):
                 _log_warn(f"    工具返回错误: {data['error']}")
             else:
@@ -235,12 +230,11 @@ class PromptAgent:
         mapping = {}
         try:
             data = json.loads(result_str)
-            if data.get("found"):
-                for t in data.get("tags", []):
-                    tag = (t.get("tag") or "").strip()
-                    cn = (t.get("cn_name") or "").strip()
-                    if tag and cn:
-                        mapping[tag] = cn
+            for t in data.get("results", []):
+                tag = (t.get("tag") or "").strip()
+                cn = (t.get("cn_name") or "").strip()
+                if tag and cn:
+                    mapping[tag] = cn
         except Exception:
             pass
         return mapping
@@ -288,14 +282,14 @@ class PromptAgent:
         for dim in dimensions:
             _log(f"  > 搜索：{dim}", _C.GREEN)
             result_str = execute_search_tags(
-                query=dim, use_segmentation=True, top_k=5, limit=80, show_nsfw=True,
+                query=dim, search_mode="full_scene", show_nsfw=True,
             )
             try:
                 data = json.loads(result_str)
-                if data.get("found"):
-                    tags = data.get("tags", [])
-                    _log(f"    找到 {len(tags)} 个标签", _C.GREEN)
-                    for t in tags:
+                results = data.get("results", [])
+                if results:
+                    _log(f"    找到 {len(results)} 个标签", _C.GREEN)
+                    for t in results:
                         tag = t.get("tag", "")
                         if tag:
                             all_tag_names.append(tag)
@@ -362,11 +356,10 @@ class PromptAgent:
                     self._log_tool_result(name, result)
                     try:
                         related_data = json.loads(result)
-                        if related_data.get("found"):
-                            for t in related_data.get("tags", []):
-                                tag = t.get("tag", "")
-                                if tag:
-                                    all_tag_names.append(tag)
+                        for t in related_data.get("results", []):
+                            tag = t.get("tag", "")
+                            if tag:
+                                all_tag_names.append(tag)
                     except Exception:
                         pass
         except Exception as e:

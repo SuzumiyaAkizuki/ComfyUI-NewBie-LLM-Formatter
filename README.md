@@ -28,7 +28,7 @@
 | 等级 | 说明 | 适用场景 |
 |------|------|---------|
 | **Close** | 关闭 Agent，走传统单轮 LLM 调用 | 已有完整标签、追求速度 |
-| **Low** | 流水线模式：一次批量搜索 + LLM 直接组装，1 轮完成 | 追求最快速度，场景不复杂 |
+| **Low** | 流水线模式：一次批量搜索 + LLM 直接组装1 轮完成 | 追求最快速度，场景不复杂 |
 | **Medium** | Agent 循环模式：多轮迭代搜索，最多 8 轮 | 日常使用，速度与质量平衡 |
 | **High** | Agent 循环模式：宽召回 + 深探索，最多 10 轮 | 复杂场景、多人物、追求极致精度 |
 
@@ -182,7 +182,7 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | `model_name` | STRING/下拉框 | 模型名称。若配置文件中的 `model_list` 有效，显示为下拉框；否则显示为文本输入框。 |
 | `mode` | 下拉框 | **NewBie**（默认）或 **Anima**。决定使用哪套 system prompt 以及输出解析方式。 |
 | `thinking` | BOOLEAN | 深度思考模式开关。`true` 时模型进行深度思考，思考过程输出到控制台。**推荐设置为 `false`。** Agent 模式下此开关被强制关闭。 |
-| `agent_effort` | 下拉框 | **[v1.9.9 新增]** Agent 努力等级。`Close`（默认）= 关闭 Agent，走普通模式；`Low` = 流水线模式（单轮批量搜索 + LLM 组装，不走 Agent 循环，最快）；`Medium` = Agent 循环模式（多轮工具调用，每轮 top_k=5，最多 8 轮）；`High` = Agent 循环模式（宽召回 top_k=10，最多 10 轮，最深入）。 |
+| `agent_effort` | 下拉框 | **[v1.9.9 新增]** Agent 努力等级。`Close`（默认）= 关闭 Agent，走普通模式；`Low` = 流水线模式（单轮批量搜索 + LLM 组装，不走 Agent 循环，最快）；`Medium` = Agent 循环模式（`full_scene` 预设，平衡召回质量与收敛速度，最多 8 轮）；`High` = Agent 循环模式（`concept_explore` 宽召回预设 + 默认携带 wiki 释义，最多 10 轮，最深入）。 |
 | `user_text` | STRING | 待转换的自然语言描述或标签集。 |
 
 **输出参数：**
@@ -410,6 +410,17 @@ Anima 模式下的画师和风格注入逻辑：
 
 <details open>
 <summary>展开/折叠更新历史</summary>
+
+### 2026年05月25日 v1.3.0
+
+> 适配 MCP 服务端 v2 API，引入 `search_mode` 预设策略，修复关联推荐失效问题。
+
+- **MCP API 升级（search_mode 预设）**：`search_tags` 参数从 6 个底层参数（`use_segmentation` / `top_k` / `limit` / `popularity_weight` / `group_mode` / `max_per_group`）统一为 `search_mode` 预设策略，四种预设覆盖全部场景：`full_scene`（场景→提示词）、`concept_explore`（宽召回探索）、`subject_describe`（主体匹配）、`precise_lookup`（拼写纠错）。服务端管理最优参数组合，客户端无需调参。
+- **High 模式增强**：High effort 级别默认开启 `include_wiki`，Agent 在深度探索时可获取每个标签的英文 Wiki 释义，判断更有依据。LLM 可按需通过显式传参关闭。
+- **工具响应透传**：`execute_search_tags` / `execute_get_related_tags` 不再对 MCP 返回做客户端二次解析和重组，直接透传原始 JSON 给 LLM。消除了客户端字段名与服务端不同步导致的解析 bug，且 LLM 能获取完整的原始数据（`prompt`、`keywords`、`hint`、`cooc_score`、`sources` 等），信息零丢失。
+- **修复**：`get_related_tags` 因服务端字段名变更后客户端 key 不匹配（查 `tags` 实为 `results`）导致关联推荐永远返回空结果的 bug。
+- **Effort 配置重构**：`_EFFORT_CONFIG` 从硬编码 `top_k`/`limit` 截断改为 `search_mode` 预设映射（Low/Medium → `full_scene`，High → `concept_explore`），LLM 可通过工具参数按需覆盖，不再受 effort 级别硬性约束。
+- **系统提示词更新**：Agent 工具使用规则（规则 5）更新为四种 `search_mode` 策略的使用指南。
 
 ### 2026年05月17日 v1.2.9 [exp]
 
