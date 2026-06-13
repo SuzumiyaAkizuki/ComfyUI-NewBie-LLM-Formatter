@@ -15,6 +15,7 @@ from openai import OpenAI
 
 from prompt_agent.agent_prompts import (
     get_agent_system_prompt,
+    get_format_tool_directive,
     LOW_ASSEMBLY_PROMPT,
     QUERY_REWRITE_PROMPT,
 )
@@ -22,6 +23,9 @@ from prompt_agent.tools import (
     get_tools,
     execute_search_tags,
     execute_get_related_tags,
+    execute_get_artist_recommendations,
+    execute_get_anima_format,
+    execute_get_newbie_format,
 )
 from prompt_agent.cache import (
     get_cache, extract_tags_from_output,
@@ -29,7 +33,103 @@ from prompt_agent.cache import (
 )
 from prompt_agent import utils
 
+try:
+    import comfy.utils
+    import comfy.model_management
+    _COMFY_AVAILABLE = True
+except ImportError:
+    _COMFY_AVAILABLE = False
+
 MAX_ROUNDS = 10
+
+
+def _sanitize_messages_for_gemini(messages):
+    """规范化消息格式以兼容 Gemini API（通过 Vercel / OpenRouter 网关时的特殊处理）。
+
+    处理三类 Gemini/Vertex 严格约束（OpenAI 容忍但 Gemini 会报 400）：
+
+    1. assistant 消息携带 tool_calls 时不能同时携带 content。
+
+    2. **单轮内的并行 tool_calls 必须拆分为顺序的「单调用→单响应」回合**（关键）。
+       Gemini/Vertex 经网关转换时按 function 名匹配 functionCall / functionResponse，
+       一个 model 回合里出现多个（尤其同名，如 3 个 search_tags）functionCall 时，
+       会与 functionResponse 数量错配，报：
+       "Please ensure that the number of function response parts is equal to the
+       number of function call parts of the function call turn."（HTTP 400）。
+       这里把 `assistant[call1,call2,call3] + tool(r1)+tool(r2)+tool(r3)` 重写为
+       `assistant[call1]+tool(r1) / assistant[call2]+tool(r2) / assistant[call3]+tool(r3)`，
+       每个回合只含 1 个 functionCall + 1 个 functionResponse。工具仍是并行执行的，
+       这里只调整发送给 API 的历史结构，不影响执行性能与模型语义。
+
+    3. function call turn 之后紧跟的独立 user 文本（如轮次进度提醒）会破坏配对，
+       折叠进上一条 tool 消息的 content，保持响应回合纯净。
+
+    返回的是消息的浅拷贝，不会修改调用方持有的原始 messages 列表。
+    """
+    # Pass 1：移除 assistant+tool_calls 的 content；折叠 tool 后的 user 文本
+    sanitized = []
+    for m in messages:
+        mc = dict(m)
+        if mc.get("role") == "assistant" and mc.get("tool_calls"):
+            mc.pop("content", None)
+        if (mc.get("role") == "user"
+                and isinstance(mc.get("content"), str)
+                and sanitized and sanitized[-1].get("role") == "tool"):
+            prev = sanitized[-1]
+            prev_content = prev.get("content") or ""
+            prev["content"] = (prev_content + "\n\n" + mc["content"]) if prev_content else mc["content"]
+            continue
+        sanitized.append(mc)
+
+    # Pass 2：将并行 tool_calls 拆分为顺序的单调用回合
+    result = []
+    i = 0
+    n = len(sanitized)
+    while i < n:
+        m = sanitized[i]
+        tool_calls = m.get("tool_calls") if m.get("role") == "assistant" else None
+        if tool_calls and len(tool_calls) > 1:
+            # 收集紧随其后的 tool 响应，按 tool_call_id 建立映射
+            j = i + 1
+            resp_by_id = {}
+            while j < n and sanitized[j].get("role") == "tool":
+                resp_by_id[sanitized[j].get("tool_call_id")] = sanitized[j]
+                j += 1
+            # 为每个 call 生成「单调用 assistant + 其响应」一对
+            for tc in tool_calls:
+                single = dict(m)
+                single["tool_calls"] = [tc]
+                single.pop("content", None)
+                result.append(single)
+                resp = resp_by_id.get(tc.get("id"))
+                if resp is not None:
+                    result.append(resp)
+                else:
+                    # 理论上不会发生：缺失响应时补占位，确保 1:1 配对
+                    result.append({"role": "tool", "tool_call_id": tc.get("id"),
+                                   "content": "{}"})
+            i = j  # 跳过已消费的 tool 响应
+        else:
+            result.append(m)
+            i += 1
+    return result
+
+
+def _dump_request_debug(sanitized_messages, tools):
+    """API 调用失败时，将实际发送给 API 的完整请求体输出为 debug 日志。"""
+    import json as _json
+    payload = {
+        "model": "(see agent_core.py model_name)",
+        "messages": sanitized_messages,
+        "tools": tools,
+    }
+    try:
+        blob = _json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    except Exception:
+        blob = str(payload)
+    _log_error("── 请求体 DEBUG DUMP ──")
+    print(blob, file=sys.stderr, flush=True)
+    _log_error("── DEBUG DUMP END ──")
 
 
 class _C:
@@ -113,7 +213,7 @@ def _serialize_tool_calls(tool_calls):
 
 
 class PromptAgent:
-    def __init__(self, api_key, api_url, model_name, mode, thinking, config, effort="Medium"):
+    def __init__(self, api_key, api_url, model_name, mode, thinking, config, effort="Medium", unique_id=None):
         self.api_key = api_key
         self.api_url = api_url
         self.model_name = model_name
@@ -121,6 +221,7 @@ class PromptAgent:
         self.thinking = thinking
         self.config = config
         self.effort = effort
+        self.unique_id = unique_id
         self._effort_cfg = _EFFORT_CONFIG.get(effort, _EFFORT_CONFIG["Medium"])
         self.llm = OpenAI(api_key=api_key, base_url=api_url)
         from LLM_Node import get_platform_settings
@@ -133,6 +234,7 @@ class PromptAgent:
     def _rewrite_query(self, question):
         _log_section("查询重写")
         prompt = QUERY_REWRITE_PROMPT.format(question=question)
+        raw = None
         try:
             resp = self.llm.chat.completions.create(
                 model=self.model_name,
@@ -141,8 +243,11 @@ class PromptAgent:
                 max_tokens=500,
                 extra_body=self._extra_body,
             )
-            raw = resp.choices[0].message.content.strip()
-            raw = raw.strip("```json").strip("```").strip()
+            raw = resp.choices[0].message.content
+            if raw is None:
+                _log_warn("查询重写 LLM 返回空响应")
+                return "", []
+            raw = raw.strip().strip("```json").strip("```").strip()
             variants = json.loads(raw)
             if isinstance(variants, list):
                 user_tags = ""
@@ -162,6 +267,8 @@ class PromptAgent:
                 return user_tags, dimensions
         except Exception as e:
             _log_warn(f"查询重写失败（已跳过）: {e}")
+            if raw is not None:
+                _log_warn(f"LLM 响应体: {raw[:500]}")
         return "", []
 
     def _execute_tool(self, name, args):
@@ -190,6 +297,23 @@ class PromptAgent:
                 show_nsfw=bool(args.get("show_nsfw", True)),
                 include_wiki=bool(args.get("include_wiki", False)),
             )
+        elif name == "get_artist_recommendations":
+            tags = args.get("tags", [])
+            if isinstance(tags, str):
+                try:
+                    tags = json.loads(tags)
+                except Exception:
+                    tags = [t.strip() for t in tags.split(",") if t.strip()]
+            return execute_get_artist_recommendations(
+                tags=tags,
+                limit=int(args.get("limit", 30)),
+                min_cooc=int(args.get("min_cooc", 3)),
+                show_nsfw=bool(args.get("show_nsfw", True)),
+            )
+        elif name == "get_anima_format":
+            return execute_get_anima_format()
+        elif name == "get_newbie_format":
+            return execute_get_newbie_format()
         else:
             return json.dumps({"error": f"未知工具: {name}"}, ensure_ascii=False)
 
@@ -208,10 +332,26 @@ class PromptAgent:
                     tags = [t.strip() for t in tags.split(",") if t.strip()]
             _log(f"  > 关联推荐：{', '.join(tags[:5])}", _C.GREEN)
             _log(f"    [get_related_tags] tags={len(tags)}, limit={args.get('limit', 30)}")
+        elif name == "get_artist_recommendations":
+            tags = args.get("tags", [])
+            if isinstance(tags, str):
+                try:
+                    tags = json.loads(tags)
+                except Exception:
+                    tags = [t.strip() for t in tags.split(",") if t.strip()]
+            _log(f"  > 画师推荐：{', '.join(tags[:5])}", _C.GREEN)
+            _log(f"    [get_artist_recommendations] tags={len(tags)}, limit={args.get('limit', 30)}")
+        elif name == "get_anima_format":
+            _log(f"  > 获取 Anima 格式规范", _C.GREEN)
+        elif name == "get_newbie_format":
+            _log(f"  > 获取 NewBie 格式规范", _C.GREEN)
         else:
             _log(f"  > 调用工具：{name}", _C.GREEN)
 
     def _log_tool_result(self, name, result_str):
+        if name in ("get_anima_format", "get_newbie_format"):
+            _log(f"    格式规范已获取 ({len(result_str)} chars)", _C.GREEN)
+            return
         try:
             data = json.loads(result_str)
             results = data.get("results", [])
@@ -261,7 +401,7 @@ class PromptAgent:
         try:
             resp = self.llm.chat.completions.create(
                 model=self.model_name, messages=messages,
-                temperature=0.7, max_tokens=2048, extra_body=self._extra_body,
+                temperature=0.7, max_tokens=10240, extra_body=self._extra_body,
             )
             content = resp.choices[0].message.content or ""
         except Exception as e:
@@ -415,7 +555,7 @@ class PromptAgent:
         try:
             resp = self.llm.chat.completions.create(
                 model=self.model_name, messages=assembly_messages,
-                temperature=0.7, max_tokens=2048, extra_body=self._extra_body,
+                temperature=0.7, max_tokens=10240, extra_body=self._extra_body,
             )
             content = resp.choices[0].message.content or ""
             if resp.usage:
@@ -450,23 +590,36 @@ class PromptAgent:
         _log_banner("Low effort 流水线模式已启用")
         _log(f"模式: {self.mode} | Effort: Low | MCP: HF (主) / MS (备)")
 
+        pbar = comfy.utils.ProgressBar(4, node_id=self.unique_id) if _COMFY_AVAILABLE else None
+
+        def _tick(step):
+            if _COMFY_AVAILABLE:
+                comfy.model_management.throw_exception_if_processing_interrupted()
+            if pbar:
+                pbar.update_absolute(step)
+
         # Step 1: 查询重写
         user_tags, dimensions = self._rewrite_query(user_text)
         if not dimensions:
             dimensions = [user_text]
             _log("查询重写未返回结果，使用原始输入")
+        _tick(1)
 
         # Step 2: 批量搜索标签
         all_tag_names, tag_cn_map = self._batch_search_tags(dimensions)
         if not all_tag_names:
             _log_warn("所有维度均未搜索到标签，回退为普通模式")
             return self._fallback_normal(user_text, image)
+        _tick(2)
 
         # Step 3: 标签关联探索
         all_tag_names = self._explore_related_tags(all_tag_names, user_text)
+        _tick(3)
 
         # Step 4: 组装输出
-        return self._assemble_low_output(all_tag_names, tag_cn_map, user_text, user_tags, image)
+        result = self._assemble_low_output(all_tag_names, tag_cn_map, user_text, user_tags, image)
+        _tick(4)
+        return result
 
     def run(self, user_text, image=None):
         if self.effort == "Low":
@@ -475,12 +628,17 @@ class PromptAgent:
         _log_banner("Agent 模式已启用，开始处理用户输入...")
         _log(f"模式: {self.mode} | Effort: {self.effort} | MCP: HF (主) / MS (备)")
 
+        max_rounds = self._effort_cfg["max_rounds"]
+        pbar = comfy.utils.ProgressBar(max_rounds, node_id=self.unique_id) if _COMFY_AVAILABLE else None
+
         rewrite_queries = []
         user_tags = ""
         if self._effort_cfg.get("rewrite", True) and len(user_text) > 10:
             user_tags, rewrite_queries = self._rewrite_query(user_text)
 
-        system_content, fewshot_user, fewshot_assistant = get_agent_system_prompt(self.mode, self.config)
+        system_content, fewshot_user, fewshot_assistant = get_agent_system_prompt(
+            self.mode, self.config, max_rounds=max_rounds,
+        )
         messages = [{"role": "system", "content": system_content}]
 
         if fewshot_user and fewshot_assistant:
@@ -498,7 +656,7 @@ class PromptAgent:
                 user_content += (
                     "\n\n用户输入已覆盖全部要素，你不需要调用任何工具。"
                     "禁止调用 search_tags 或 get_related_tags。"
-                    "直接将上述标签进行标准化处理（空格→下划线、括号转义等），按 XML 格式整理输出即可。"
+                    "直接将上述标签进行标准化处理（空格→下划线、括号转义等），按格式要求整理输出即可。"
                 )
             else:
                 user_content += (
@@ -523,7 +681,9 @@ class PromptAgent:
                 + "标签后方【】内为中文参考，仅供你理解含义，不要将【】内容当作标签的一部分。"
             )
             _log(f"缓存命中: 注入 {len(cached['tags'])} 个标签")
-        # user_content += "\n\n【务必调用工具搜索，以获得准确回答】"
+
+        # 注入格式工具调用指令（根据 mode 动态选择）
+        user_content += get_format_tool_directive(self.mode)
 
         if image is not None:
             b64 = utils.tensor_to_base64(image)
@@ -539,21 +699,24 @@ class PromptAgent:
         total_tokens = 0
         duplicate_tracker = {}
         tag_cn_map: dict[str, str] = {}
-        max_rounds = self._effort_cfg["max_rounds"]
 
         while rounds < max_rounds:
+            if _COMFY_AVAILABLE:
+                comfy.model_management.throw_exception_if_processing_interrupted()
             _log_round_header(rounds + 1)
             _tools = get_tools()
-            _log(f"LLM 请求: {len(_tools)} tools available")
+            _log(f"LLM 请求: {len(_tools)} tools available, {len(messages)} messages")
 
+            _messages = _sanitize_messages_for_gemini(messages)
             try:
                 resp = self.llm.chat.completions.create(
-                    model=self.model_name, messages=messages, tools=_tools,
-                    tool_choice="auto", temperature=0.7, max_tokens=2048,
+                    model=self.model_name, messages=_messages, tools=_tools,
+                    tool_choice="auto", temperature=0.7, max_tokens=10240,
                     extra_body=self._extra_body,
                 )
             except Exception as e:
                 _log_error(f"LLM API 调用失败: {e}")
+                _dump_request_debug(_messages, _tools)
                 raise
 
             msg = resp.choices[0].message
@@ -568,6 +731,7 @@ class PromptAgent:
             if finish_reason == "tool_calls" and tool_calls:
                 # 预先解析参数并过滤重复调用
                 parsed = []
+                skipped = []
                 for tc in tool_calls:
                     name = tc["function"]["name"]
                     raw_args = tc["function"]["arguments"]
@@ -579,15 +743,21 @@ class PromptAgent:
                     count = duplicate_tracker.get(call_key, 0) + 1
                     duplicate_tracker[call_key] = count
                     if count > 3:
-                        _log_warn(f"检测到重复调用 {name}（第{count}次），跳过")
+                        _log_warn(f"检测到重复调用 {name}（第{count}次），跳过执行")
+                        skipped.append(tc)
                         continue
                     parsed.append((tc, name, args))
                 if not parsed:
+                    # 所有 tool_calls 均为重复：仍需添加 assistant+tool 消息，
+                    # 否则上一轮遗留的 tool_calls 无对应 response 会导致 API 400
+                    messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+                    for tc in tool_calls:
+                        messages.append({"role": "tool", "tool_call_id": tc["id"],
+                                         "content": json.dumps({"skipped": "duplicate"}, ensure_ascii=False)})
                     _log_error("所有 tool_calls 均为重复调用，强制退出循环")
                     break
-                # 仅追加未重复的 tool_calls 到 assistant 消息
-                filtered_calls = [p[0] for p in parsed]
-                messages.append({"role": "assistant", "content": content, "tool_calls": filtered_calls})
+                # 全量 tool_calls 放入 assistant 消息，确保与后续 tool response 一一对应
+                messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
                 # 并行执行所有工具调用（HTTP I/O，无 GIL 竞争）
                 try:
                     with ThreadPoolExecutor(max_workers=min(len(parsed), 8)) as pool:
@@ -607,24 +777,47 @@ class PromptAgent:
                                 ))
                 except Exception as e:
                     _log_error(f"并行工具调用失败: {e}")
+                    # 为所有未响应的 tool_calls 添加错误 response，保证一一对应
+                    for tc, _, _ in parsed:
+                        messages.append({"role": "tool", "tool_call_id": tc["id"],
+                                         "content": json.dumps({"error": str(e)}, ensure_ascii=False)})
+                    for tc in skipped:
+                        messages.append({"role": "tool", "tool_call_id": tc["id"],
+                                         "content": json.dumps({"skipped": "duplicate"}, ensure_ascii=False)})
                     break
+                # 非重复调用：写入实际结果
                 for (tc, name, args), result in zip(parsed, results):
                     self._log_tool_call(name, args)
                     self._log_tool_result(name, result)
                     tag_cn_map.update(self._collect_cn_from_result(result))
                     messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                # 被跳过的重复调用：写入占位 response，保证一一对应
+                for tc in skipped:
+                    messages.append({"role": "tool", "tool_call_id": tc["id"],
+                                     "content": json.dumps({"skipped": "duplicate"}, ensure_ascii=False)})
                 rounds += 1
+                if pbar:
+                    pbar.update_absolute(rounds)
+                remaining = max_rounds - rounds
+                progress_msg = (
+                    f"【轮次进度】你最多可调用 {max_rounds} 轮工具，"
+                    f"现已完成第 {rounds} 轮（剩余 {remaining} 轮）。"
+                    f"请根据剩余轮次调整搜索策略，避免超预算后被强制截断。"
+                )
+                messages.append({"role": "user", "content": progress_msg})
                 continue
 
             _log(f"LLM 输出最终回答 (finish_reason={finish_reason})")
             break
         else:
             _log_error(f"Agent 循环超过最大轮次 ({max_rounds})，强制输出")
+            if _COMFY_AVAILABLE:
+                comfy.model_management.throw_exception_if_processing_interrupted()
             messages.append({"role": "user", "content": "请根据已收集到的标签信息直接输出最终 prompt，禁止再调用任何工具。"})
             try:
                 resp = self.llm.chat.completions.create(
                     model=self.model_name, messages=messages, temperature=0.7,
-                    max_tokens=2048, extra_body=self._extra_body,
+                    max_tokens=10240, extra_body=self._extra_body,
                 )
                 content = resp.choices[0].message.content or ""
                 if resp.usage:
@@ -664,16 +857,17 @@ class PromptAgent:
         explanation_match = re.search(r'##\s*中文解释\s*\n(.*)', content, re.DOTALL)
 
         if prompt_match and explanation_match:
-            xml_out = prompt_match.group(1).strip()
-            text_out = explanation_match.group(1).strip()
+            xml_out = utils.strip_code_fences(prompt_match.group(1))
+            text_out = utils.strip_code_fences(explanation_match.group(1))
             _log_ok(f"成功按标题分割: Prompt={len(xml_out)} chars, 解释={len(text_out)} chars")
         elif prompt_match:
-            xml_out = prompt_match.group(1).strip()
+            xml_out = utils.strip_code_fences(prompt_match.group(1))
             text_out = ""
             _log_warn("未找到 ## 中文解释 标题，仅提取 Prompt 部分")
         else:
             _log_warn("未找到 ## Prompt 标题，回退到按行分离中英文")
             xml_out, text_out = _split_by_language(content)
+            xml_out = utils.strip_code_fences(xml_out)
             if not xml_out:
                 _log_warn("Anima 模式未检测到英文内容，返回完整响应")
                 xml_out = content

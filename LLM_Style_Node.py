@@ -35,94 +35,253 @@ def load_styles_from_config():
     return styles
 
 
-def format_anima_artists(artist_str):
+# ---------------------------------------------------------------------------
+# Tag parsing and formatting utilities
+# ---------------------------------------------------------------------------
+
+def _parse_nested_weight(tag_str):
     """
-    Clean and convert a comma-separated artist string to @artist1, @artist2 format.
-    Anima 格式使用空格而非下划线，因此保留 tag 内部的空格，也不删除独立数字。
-    Cleaning steps per artist name:
-      1. Remove brackets: [], {}, ()
-      2. Remove colon-prefixed weights (e.g. :1.2, :0.93)
-      3. Strip whitespace and prepend @.
+    Parse nested bracket weights like ((tag)), [tag], ([(tag)]).
+    Returns (inner_content, computed_weight).
+    Small parentheses () multiply by 1.2, square brackets [] multiply by 0.9.
     """
-    if not artist_str.strip():
+    weight = 1.0
+    s = tag_str.strip()
+
+    while len(s) >= 2:
+        if s[0] == '(' and s[-1] == ')':
+            weight *= 1.2
+            s = s[1:-1].strip()
+        elif s[0] == '[' and s[-1] == ']':
+            weight *= 0.9
+            s = s[1:-1].strip()
+        else:
+            break
+
+    return s, round(weight, 2)
+
+
+def parse_tag(tag_str):
+    """
+    Parse a single tag string into (content, weight).
+    Supports three weight formats:
+      1. (tag:1.2)       - parenthesized with explicit weight
+      2. 1.2::tag::      - double-colon prefix format
+      3. ((tag))         - nested brackets (1.2 per (), 0.9 per [])
+    Returns (content: str, weight: float or None).
+    """
+    s = tag_str.strip()
+    if not s:
+        return '', None
+
+    # Format 2: weight::content::
+    m = re.match(r'^([\d.]+)::(.+)::$', s)
+    if m:
+        try:
+            w = float(m.group(1))
+            content = m.group(2).strip()
+            return content, round(w, 2)
+        except ValueError:
+            pass
+
+    # Format 1: (content:weight) - must have explicit :weight inside parens
+    m = re.match(r'^\((.+):([\d.]+)\)$', s)
+    if m:
+        content = m.group(1).strip()
+        try:
+            w = float(m.group(2))
+            return content, round(w, 2)
+        except ValueError:
+            pass
+
+    # Format 3: nested brackets ((tag)), [tag], etc.
+    if (s[0] in '([' and s[-1] in ')]'):
+        # Check if balanced
+        depth = 0
+        balanced = True
+        for ch in s:
+            if ch in '([':
+                depth += 1
+            elif ch in ')]':
+                depth -= 1
+            if depth < 0:
+                balanced = False
+                break
+        if balanced and depth == 0:
+            inner, w = _parse_nested_weight(s)
+            if w != 1.0:
+                return inner, w
+
+    # No weight
+    return s, None
+
+
+def _escape_parens(content):
+    """Escape parentheses in tag content with backslashes."""
+    s = content.replace('\\(', '\x00').replace('\\)', '\x01')  # preserve existing escapes
+    s = s.replace('(', '\\(').replace(')', '\\)')
+    s = s.replace('\x00', '\\(').replace('\x01', '\\)')
+    return s
+
+
+def format_tag_newbie(content, weight):
+    """Format a tag for NewBie mode: keep underscores, escape parens in content."""
+    escaped = _escape_parens(content)
+    if weight is not None and weight != 1.0:
+        return f"({escaped}:{weight})"
+    return escaped
+
+
+def format_tag_anima(content, weight):
+    """Format a tag for Anima mode: underscores to spaces, escape parens, add @."""
+    escaped = _escape_parens(content)
+    escaped = escaped.replace('_', ' ')
+    if not escaped.startswith('@'):
+        escaped = f'@{escaped}'
+    if weight is not None and weight != 1.0:
+        return f"({escaped}:{weight})"
+    return escaped
+
+
+def parse_artist_string(artist_str):
+    """
+    Parse a comma-separated artist string into a list of (content, weight) tuples.
+    """
+    if not artist_str or not artist_str.strip():
+        return []
+
+    raw_tags = [t.strip() for t in artist_str.split(',') if t.strip()]
+    result = []
+    for tag in raw_tags:
+        # Remove artist: prefix if present
+        tag = re.sub(r'(?i)^artist:\s*', '', tag)
+        # Remove orphan :: (single unmatched ones)
+        # Valid format is weight::content::, so :: should appear in pairs
+        # Count :: occurrences
+        double_colon_count = tag.count('::')
+        if double_colon_count == 1:
+            # Single orphan :: - remove it
+            tag = tag.replace('::', '')
+        elif double_colon_count > 2:
+            # Too many :: - try to extract valid pattern or clean up
+            tag = tag.replace('::', '')
+
+        content, weight = parse_tag(tag)
+        if content:
+            result.append((content, weight))
+    return result
+
+
+def format_artist_string(artist_str, mode):
+    """
+    Parse and reformat an artist string according to the specified mode.
+    Returns formatted string with tags joined by ', '.
+    """
+    tags = parse_artist_string(artist_str)
+    if not tags:
         return ""
 
-    # Remove bracket characters before splitting
-    artist_str = re.sub(r'[\[\]{}()]', '', artist_str)
+    if mode == "NewBie":
+        formatted = [format_tag_newbie(c, w) for c, w in tags]
+    else:  # Anima
+        formatted = [format_tag_anima(c, w) for c, w in tags]
 
-    tags = [t.strip() for t in artist_str.split(',') if t.strip()]
+    return ', '.join(formatted)
 
-    cleaned = []
-    for tag in tags:
-        if tag.startswith('@'):
-            tag = tag[1:]
-        # Remove "artist:" prefix (case-insensitive)
-        tag = re.sub(r'(?i)^artist:', '', tag.strip())
-        # Remove colon-prefixed numbers/weights (e.g. :1.2, :0.93) before stripping colons
-        tag = re.sub(r':\d+(\.\d+)?', '', tag)
-        # Remove all remaining colons
-        tag = tag.replace(':', '')
-        # Anima 格式使用空格而非下划线，仅去除首尾空白即可
-        # 也不删除独立数字，因为 Anima artist 名称可能含数字（如 dush 1154）
-        tag = tag.strip()
-        if tag:
-            cleaned.append(f'@{tag}')
 
-    return ', '.join(cleaned)
+def deduplicate_tags(base_tags, override_tags):
+    """
+    Merge two tag lists, override_tags takes precedence over base_tags.
+    Comparison is done on the raw content (before formatting).
+    Returns merged list as (content, weight) tuples.
+    """
+    # Build dict from base, then override
+    tag_dict = {}
+    for content, weight in base_tags:
+        tag_dict[content] = weight
+    for content, weight in override_tags:
+        tag_dict[content] = weight
+    # Return in order: base order first, then new override tags
+    base_contents = {c for c, _ in base_tags}
+    override_only = [(c, w) for c, w in override_tags if c not in base_contents]
+
+    result = []
+    for content, weight in base_tags:
+        if content in tag_dict:
+            result.append((content, tag_dict[content]))
+            del tag_dict[content]
+    # Add remaining override tags
+    for content, weight in override_only:
+        result.append((content, weight))
+
+    return result
+
+
+def _is_anima_artist_tag(tag_str):
+    """Check if a string looks like an Anima artist tag (starts with @)."""
+    return tag_str.strip().startswith('@')
+
+
+def _strip_anima_artists_from_text(text):
+    """
+    Remove all @artist tags from Anima prompt text.
+    Returns (cleaned_text, first_artist_position).
+    first_artist_position is the index where the first @artist was found, or -1.
+    """
+    lines = text.split('\n')
+    first_pos = -1
+
+    for i, line in enumerate(lines):
+        # Find all @artist tags in this line
+        # Pattern: @ followed by non-comma chars, possibly with weight like (@tag:1.2)
+        matches = list(re.finditer(r'@[^,\n]+', line))
+        if matches:
+            if first_pos == -1:
+                first_pos = i
+            # Remove artist tags from line
+            for m in reversed(matches):
+                line = line[:m.start()] + line[m.end():]
+            # Clean up leftover commas and spaces
+            line = re.sub(r'\s*,\s*,\s*', ', ', line)
+            line = line.strip(' ,')
+            lines[i] = line
+
+    return '\n'.join(lines), first_pos
 
 
 def inject_anima_style(prompt_text, artist_str, style_str):
     """
     Inject artist and style into an Anima-mode plain text prompt.
-    Mirrors NewBie upsert behaviour: if a field is empty, leave the original untouched.
+    Rules:
+      - Remove all existing @artist tags from prompt
+      - Insert new artists at the position of the first removed artist
+      - Append style at the end
+      - If a field is empty, leave the original untouched
     """
-    lines = prompt_text.splitlines()
+    if not artist_str.strip() and not style_str.strip():
+        return prompt_text
 
-    def is_artist_line(line):
-        stripped = line.strip()
-        if not stripped:
-            return False
-        # 两个逗号中间的内容就是一个完整的 artist tag，可包含空格
-        return bool(re.match(r'^@[^,\n]+(?:\s*,\s*@[^,\n]+)*$', stripped))
+    formatted_artists = format_artist_string(artist_str, "Anima") if artist_str.strip() else ""
 
-    def strip_artists_from_line(line):
-        # @ 开头、到逗号或行尾为止的内容就是一个 artist tag
-        line = re.sub(r'@[^,\n]+', '', line)
-        line = re.sub(r'\s*,\s*,\s*', ', ', line)
-        return line.strip(' ,')
+    # Strip existing artists and find insertion point
+    cleaned_text, first_artist_pos = _strip_anima_artists_from_text(prompt_text)
 
-    result_lines = list(lines)
-    non_empty = [(i, l) for i, l in enumerate(result_lines) if l.strip()]
+    lines = cleaned_text.split('\n')
 
-    if not non_empty:
-        parts = [p for p in [format_anima_artists(artist_str), prompt_text, style_str] if p]
-        return "\n".join(parts)
-
-    # --- Artist injection (only when artist_str is non-empty) ---
-    if artist_str.strip():
-        formatted_artists = format_anima_artists(artist_str)
-
-        artist_line_idx = None
-        if len(non_empty) >= 2:
-            second_idx, second_line = non_empty[1]
-            if is_artist_line(second_line):
-                artist_line_idx = second_idx
-
-        if artist_line_idx is not None:
-            result_lines[artist_line_idx] = formatted_artists
+    if formatted_artists:
+        if first_artist_pos >= 0:
+            # Insert at the position where first artist was
+            lines.insert(first_artist_pos, formatted_artists)
         else:
-            first_idx = non_empty[0][0]
-            result_lines[first_idx] = strip_artists_from_line(result_lines[first_idx])
-            if formatted_artists:
-                result_lines.insert(first_idx + 1, formatted_artists)
-    else:
-        print(f"{BColors.WARNING}[XML_Style_Injector]: 用户未输入 Artist，保持原有 Artist 不变{BColors.ENDC}")
+            # No existing artists found, insert after first non-empty line
+            non_empty_idx = next((i for i, l in enumerate(lines) if l.strip()), 0)
+            lines.insert(non_empty_idx + 1, formatted_artists)
 
-    # --- Style injection (only when style_str is non-empty) ---
+    # Append style at end
     if style_str.strip():
-        result_lines.append(style_str)
+        lines.append(style_str.strip())
 
-    return "\n".join(result_lines)
+    return '\n'.join(lines)
 
 
 class LLM_Xml_Style_Injector:
@@ -166,20 +325,42 @@ class LLM_Xml_Style_Injector:
         preset_artist = selected_data.get("artist", "").strip()
         preset_style = selected_data.get("style", "").strip()
 
+        # Combine artist tags with deduplication (artist_add overrides preset)
+        if artist_add.strip() and preset_artist:
+            add_tags = parse_artist_string(artist_add)
+            preset_tags = parse_artist_string(preset_artist)
+            merged_tags = deduplicate_tags(preset_tags, add_tags)
+            target_artist_tags = merged_tags
+        elif artist_add.strip():
+            target_artist_tags = parse_artist_string(artist_add)
+        else:
+            target_artist_tags = parse_artist_string(preset_artist)
+
+        # Combine style tags (simple concatenation, no dedup needed)
         def combine_tags(input_val, preset_val):
             input_val = input_val.strip()
             if input_val and preset_val:
                 return f"{input_val}, {preset_val}"
             return input_val if input_val else preset_val
 
-        target_artist = combine_tags(artist_add, preset_artist)
         target_style = combine_tags(style_add, preset_style)
 
         if mode == "Anima":
-            result = inject_anima_style(xml_input, target_artist, target_style)
+            # Format artist tags for Anima
+            if target_artist_tags:
+                formatted_artist = ', '.join(format_tag_anima(c, w) for c, w in target_artist_tags)
+            else:
+                formatted_artist = ""
+            result = inject_anima_style(xml_input, formatted_artist, target_style)
             return (result,)
 
-        # NewBie mode: existing XML injection logic
+        # NewBie mode: XML injection
+        # Format artist tags for NewBie
+        if target_artist_tags:
+            target_artist = ', '.join(format_tag_newbie(c, w) for c, w in target_artist_tags)
+        else:
+            target_artist = ""
+
         match = re.search(r'(<img>.*?</img>)', xml_input, re.DOTALL | re.IGNORECASE)
 
         if not match:

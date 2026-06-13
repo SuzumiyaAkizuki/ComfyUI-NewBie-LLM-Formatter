@@ -10,7 +10,8 @@
 
 ---
 
-## Agent 模式（v1.2.9 新增）
+<details open>
+<summary><h2 style="display:inline">重要更新：Agent 模式（v1.2.9 新增）</h2></summary>
 
 传统模式下，LLM 只能凭训练记忆生成标签，容易产生幻觉（编造不存在的标签）或遗漏关键属性。**Agent 模式**让 LLM 在生成提示词的过程中调用[DanbooruSearchOnline](https://huggingface.co/spaces/SAkizuki/DanbooruSearch)的MCP服务，**实时搜索 Danbooru 标签库**，像人类一样查找、验证、补充标签，最终输出一套精确、完整的提示词。
 
@@ -32,13 +33,15 @@
 | **Medium** | Agent 循环模式：多轮迭代搜索，最多 8 轮 | 日常使用，速度与质量平衡 |
 | **High** | Agent 循环模式：宽召回 + 深探索，最多 10 轮 | 复杂场景、多人物、追求极致精度 |
 
-> **建议**：日常使用选 **Medium**；输入已经是完整的标签串时选 **Close**（或 **Low**，会自动识别并 1 轮直出）；复杂多人场景选 **High**。
+> **建议**：日常使用选 **Medium**；输入已经是完整的标签串时选 **Close**（或 **Low**，会自动识别并 1 轮直出）；复杂场景选 **High**。
 
 ### 效率提示
 
 - 如果你已经有一组标签，直接在输入框粘贴（逗号分隔），Agent 会识别并跳过搜索，1 轮完成。
 - 混合输入（标签 + 自然语言描述）会只搜索自然语言部分涉及的维度，不会浪费轮次。
 - 控制台会显示 `[Agent]` 前缀的详细日志，可以观察每轮的搜索内容和 Token 消耗。
+
+</details>
 
 ---
 
@@ -59,14 +62,34 @@
 
 ## 目录
 
+- [Agent 模式（v1.2.9 新增）](#agent-模式v129-新增)
+- [效果展示](#效果展示)
 - [安装和使用方法](#安装和使用方法)
 - [配置文件说明](#配置文件说明)
 - [节点说明](#节点说明)
 - [依赖](#依赖)
 - [参考工作流](#参考工作流)
 - [更新说明](#更新说明)
+- [其他](#其他)
 
 ---
+
+## 效果展示
+
+|                            Prompt                            |            使用模型             |                             结果                             |
+| :----------------------------------------------------------: | :-----------------------------: | :----------------------------------------------------------: |
+|                  天海春香和菊地真在一起演出                  | deepseek-v4-pro/anima-base-1.0  | ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202606132052480.png) |
+| 为我生成一个不良少女、辣妹的完整图像。要求如下：1. 必须含有皮项圈、露指手套、腰间系着夹克、高马尾这四个元素 2. 画面必须完整，有动作、背景等。动作要有动感。3. 画面以人物为主体，头胸部特写。其它特征自由发挥。 | deepseek-v4-pro/anima-base-1.0  | ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202606132055129.png) |
+|                        （见下文[1]）                         |   deepseek-v4-pro/Newbie 0.1    | ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202606132105429.png) |
+| 《向山进发》中的雪村葵和《摇曳露营》中的志摩凛一起在富士山脚下露营。 | gemini-3.5-flash/anima-base-1.0 | ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202606132122284.png) |
+
+
+
+```
+[1]:1girl,white_hair,blue_eyes,medium_hair,high_ponytail,sidelocks,headset<br/>parted_lips<br/>small_breasts,white_serafuku,white_shirt,deep_blue_sailor_collar,short_sleeves,shirt_tucked_in,elbow_pads,fingerless_gloves,toned,tactical_school_uniform,utility_vest,red_neckerchief,high-waist_belt,nylon_belt,unit_patch,<br/>white_skirt,short_skirt,knee_pads<br/>在一片废弃的工厂里，上述人物分开双腿站立，她一条胳膊竖直向下，另一条胳膊抱着这条竖直向下的胳膊(hand on own arm)。她表情决绝、坚定。衣服上有血迹且残破、磨损，体现出战斗后的战损感。cowboy_shot.
+```
+
+
 
 ## 安装和使用方法
 
@@ -410,6 +433,20 @@ Anima 模式下的画师和风格注入逻辑：
 
 <details open>
 <summary>展开/折叠更新历史</summary>
+
+### 2026年06月13日 v1.3.1
+
+> 增强 ComfyUI 集成体验，新增画师推荐工具，完善 Anima 输出规范。
+
+- **进度条显示**：LLM 处理和 Agent 模式现在会显示进度条，可直观观察处理进度。
+- **中断支持**：处理过程中支持随时中断，不会卡死工作流。
+- **Gemini 模型兼容性修复**：修复使用 Gemini 模型（通过 OpenRouter 等网关）时出现 400 错误的问题。
+- **Agent 轮次预算提醒**：Agent 循环中会显示剩余可用轮次，便于合理规划搜索策略。
+- **新增画师推荐工具**：Agent 模式下可根据标签自动推荐适合的画师。
+- **新增格式规范工具**：Agent 首轮自动获取 Anima/NewBie 官方格式规范，输出更准确。
+- **Anima 输出规范增强**：新增标签互斥检查规则和自检清单，避免矛盾标签组合，提升输出质量。
+- **输出格式优化**：自动清理 LLM 输出中的代码块标记，输出更干净。
+- **标签格式扩展**：支持更多权重格式（如 `1.2::tag::`、`((tag))` 等），兼容性更强。
 
 ### 2026年05月25日 v1.3.0
 

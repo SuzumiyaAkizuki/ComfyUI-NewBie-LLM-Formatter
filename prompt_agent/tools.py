@@ -95,6 +95,43 @@ _FALLBACK_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_artist_recommendations",
+            "description": (
+                "Recommend artists who are skilled at drawing the given tags, based on NPMI co-occurrence data. "
+                "Given a list of Danbooru tags (e.g. character names, clothing, styles), this tool returns "
+                "artists whose works frequently co-occur with those tags on Danbooru, ranked by aggregated NPMI score."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tags":      {"type": "array", "items": {"type": "string"}, "description": "Danbooru tag names to base artist recommendations on."},
+                    "limit":     {"type": "integer", "description": "Max artists returned. Default 30."},
+                    "min_cooc":  {"type": "integer", "description": "Minimum co-occurrence count per (tag, artist) pair. Default 3."},
+                    "show_nsfw": {"type": "boolean", "description": "Include NSFW artist data. Default True."},
+                },
+                "required": ["tags"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_anima_format",
+            "description": "返回 Anima 文生图模型的 Hybrid 混合提示词格式规范。当用户提到 Anima 提示词/Anima 格式/Anima Prompt/Anima 模型等关键词时，应在搜索标签完成、最终输出前调用此工具，以获取完整的提示词组装规范。",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_newbie_format",
+            "description": "返回 NewBie 文生图模型的 XML 格式提示词规范。当用户提到 NewBie 提示词/NewBie 格式/NewBie Prompt/NewBie 模型等关键词时，应在搜索标签完成、最终输出前调用此工具，以获取完整的 XML 格式组装规范。",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
@@ -289,7 +326,7 @@ def load_tools_from_mcp() -> list[dict]:
                 },
             })
 
-        print(f"[tools] 已从 MCP 加载 {len(converted)} 个工具定义（每次调用独立握手）", file=sys.stderr)
+        print(f"[tools] 已从 MCP 加载 {len(converted)} 个工具定义", file=sys.stderr)
         return converted
 
     except Exception as e:
@@ -394,4 +431,53 @@ def execute_get_related_tags(
     if "error" in data:
         return json.dumps({"error": data["error"]}, ensure_ascii=False)
 
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def execute_get_artist_recommendations(
+    tags: list[str],
+    limit: int = 30,
+    min_cooc: int = 3,
+    show_nsfw: bool = True,
+) -> str:
+    """调用 MCP get_artist_recommendations，直接透传服务端返回的原始 JSON 字符串。"""
+    if not tags:
+        return json.dumps({"error": "tags 列表为空"}, ensure_ascii=False)
+
+    data = _call_mcp("get_artist_recommendations", {
+        "tags":      tags,
+        "limit":     limit,
+        "min_cooc":  min_cooc,
+        "show_nsfw": show_nsfw,
+    })
+
+    if "error" in data:
+        return json.dumps({"error": data["error"]}, ensure_ascii=False)
+
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def execute_get_anima_format() -> str:
+    """调用 MCP get_anima_format，获取 Anima 模型的提示词格式规范。"""
+    data = _call_mcp("get_anima_format", {})
+
+    if "error" in data:
+        return json.dumps({"error": data["error"]}, ensure_ascii=False)
+
+    # MCP 返回的 raw 文本直接透传
+    if "raw" in data:
+        return data["raw"]
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def execute_get_newbie_format() -> str:
+    """调用 MCP get_newbie_format，获取 NewBie 模型的提示词格式规范。"""
+    data = _call_mcp("get_newbie_format", {})
+
+    if "error" in data:
+        return json.dumps({"error": data["error"]}, ensure_ascii=False)
+
+    # MCP 返回的 raw 文本直接透传
+    if "raw" in data:
+        return data["raw"]
     return json.dumps(data, ensure_ascii=False, indent=2)

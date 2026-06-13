@@ -4,6 +4,8 @@ import json
 from openai import OpenAI
 from prompt_agent.agent_core import PromptAgent
 from prompt_agent import utils
+import comfy.utils
+import comfy.model_management
 
 
 class BColors:
@@ -132,6 +134,9 @@ class LLM_Prompt_Formatter:
             },
             "optional": {
                 "image": ("IMAGE",),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
             }
         }
 
@@ -274,6 +279,7 @@ class LLM_Prompt_Formatter:
         """
         if is_anima:
             xml_content, text_content = utils.split_by_language(full_response)
+            xml_content = utils.strip_code_fences(xml_content)
             if not xml_content:
                 print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: Anima模式未检测到英文内容，返回完整响应。{BColors.ENDC}")
                 xml_content = full_response
@@ -293,7 +299,7 @@ class LLM_Prompt_Formatter:
 
     # ── 主方法 ─────────────────────────────────────────────────────────
 
-    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, image=None):
+    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, image=None, unique_id=None):
         config = load_api_config()
         final_key, final_url = self._resolve_credentials(config, api_key, api_url)
 
@@ -304,8 +310,11 @@ class LLM_Prompt_Formatter:
                 agent = PromptAgent(
                     api_key=final_key, api_url=final_url, model_name=model_name,
                     mode=mode, thinking=thinking, config=config, effort=agent_effort,
+                    unique_id=unique_id,
                 )
                 return agent.run(user_text, image=image)
+            except comfy.model_management.InterruptProcessingException:
+                raise
             except Exception as e:
                 print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: Agent 模式失败: {e}，回退为普通模式{BColors.ENDC}")
 
@@ -325,8 +334,11 @@ class LLM_Prompt_Formatter:
 
             extra_body = self.get_platform_settings(final_url, model_name, thinking)
             max_retries = 3
+            pbar = comfy.utils.ProgressBar(max_retries + 1, node_id=unique_id)
 
             for attempt in range(max_retries + 1):
+                comfy.model_management.throw_exception_if_processing_interrupted()
+                pbar.update_absolute(attempt + 1)
                 try:
                     response = client.chat.completions.create(
                         model=model_name, messages=messages_list,
@@ -353,6 +365,8 @@ class LLM_Prompt_Formatter:
                     # 解析输出
                     return self._parse_normal_output(full_response, is_anima, gemma_prompt)
 
+                except comfy.model_management.InterruptProcessingException:
+                    raise
                 except Exception as inner_e:
                     err_msg = str(inner_e).lower()
                     if any(kw in err_msg for kw in ["api key", "authentication", "401", "unauthorized"]):
@@ -363,6 +377,8 @@ class LLM_Prompt_Formatter:
                     else:
                         raise inner_e
 
+        except comfy.model_management.InterruptProcessingException:
+            raise
         except Exception as e:
             print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: {str(e)}, 请确认 API 配置是否正确。{BColors.ENDC}")
             raise RuntimeError(f"LLM_Prompt_Formatter failed: {str(e)}") from e

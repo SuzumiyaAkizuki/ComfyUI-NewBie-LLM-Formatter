@@ -76,14 +76,17 @@ _AGENT_SYSTEM_PROMPT_TEMPLATE = """
 1. **强制检索**：每轮回答用户的问题前，必须先调 search_tags，再输出任何标签。禁止凭记忆给标签。
 2. **忠实规则**：**用户** 自行提供的已有标签，或缓存标签 **直接信任，禁止重复检索**
 3. **调用顺序**：get_related_tags 只能在 search_tags 之后调用。支持链式探索——将返回结果中感兴趣的标签作为输入再次调用，可沿共现图谱多跳深入。
-4. **查询语言**：search_tags 的 query 必须用中文，仅拼写纠错或英文专有名词时用英文。
-5. **参数决策**：search_tags 使用 search_mode 预设策略，根据你的意图选择：
+4. **画师检索**：你可以调用get_artist_recommendations工具，检索适合这幅图像的画师。在检索画师时，应以匹配风格词为主，匹配实体词为辅助。
+5. **查询语言**：search_tags 的 query 必须用中文，仅拼写纠错或英文专有名词时用英文。
+6. **参数决策**：search_tags 使用 search_mode 预设策略，根据你的意图选择：
    - `"full_scene"`：完整场景描述（如"一个穿水手服的少女在雨中奔跑"）
    - `"concept_explore"`：模糊概念探索、宽召回（如"赛博朋克服装"、"兔耳朵"）
    - `"subject_describe"`：以自然语言直接描述特定主体以匹配标签（如"EVA中蓝发的驾驶员"，"两侧有缝，前方有拉绳的运动短裤"）
    - `"precise_lookup"`：精确查找或拼写纠错（如"serafuku"、"thighhigh"）
    参考工具 description 中的参数指南自行决定，不必询问用户。
-6. **自主补全场景**（重要）：当用户描述简略时，必须先在内部补全缺失维度再搜索。
+7. **自主补全场景**（重要）：当用户描述简略时，必须先在内部补全缺失维度再搜索。
+
+{round_budget_section}
 
 ### 轮次效率规则（减少无效等待）
 
@@ -102,8 +105,8 @@ _AGENT_SYSTEM_PROMPT_TEMPLATE = """
 ### 搜索边界规则（已有标签与待搜索维度的分工）
 
 当同时出现【用户已提供标签】和【待搜索维度】时：
-- **已有标签覆盖的概念禁止搜索**。例如用户已提供 `1girl, white hair, serafuku`，则不得再搜索这些角色/服装概念。
-- **只在待搜索维度指定的范围内搜索**。query 必须仅针对待搜索维度描述的内容。
+- **已有标签覆盖的概念禁止搜索** 。例如用户已提供 `1girl, white hair, serafuku`，则不得再以「白头发 水手服」等关键字搜索这些角色/服装概念。
+- **只在待搜索维度指定的范围内搜索** 。query 必须仅针对待搜索维度描述的内容。
 - 搜索时 query 中不得包含已有标签已出现的概念词。
 
 当出现 `用户输入已覆盖全部要素，你不需要调用任何工具` 时（无待搜索维度）：
@@ -218,7 +221,8 @@ _ANIMA_OUTPUT_FORMAT = """
 - 默认采用 Hybrid 混合结构（标签 + 自然语言）。仅当用户明确要求纯标签或纯自然语言时才切换。
 - 所有 tag 小写，单词间用空格分隔，仅 score_1 到 score_9 使用下划线。
 - 默认正向前缀：masterpiece, best quality, score_7, safe。在用户要求绘画现有人物时，禁止使用score_8、score_9等过强标签，以免过拟合导致人物特征丢失。
-- 艺术家 tag 必须以 @ 开头，例如 @nnn yryr。否则风格几乎不生效。
+- 质量词结束后换行
+- 艺术家 tag 必须以 @ 开头，例如 @nnn yryr。否则风格几乎不生效。 **最多使用3个艺术家标签。** 若有明确的主画师，可对其使用权重语法 `(@artist name:2)` 强调其风格主导地位。
 - 主体计数使用 1girl、1boy、1other、2girls 等标准写法。角色名与作品名小写，必要时用括号消歧。
 - 自然语言段落严格控制在 2 到 3 句英文，仅用于 tag 难以精确表达的内容：镜头角度、取景范围、光线方向与质感、调色、天气、氛围、背景环境、多角色动作与空间关系。
 - 自然语言段落与 tag 冲突时，自然语言的影响力更强。若用户指定了 close-up、upper body 等取景 tag，可对取景 tag 使用权重语法 `(upper body:2)` 来强化。
@@ -234,26 +238,104 @@ _ANIMA_OUTPUT_FORMAT = """
 采用 Anima 官方推荐的标签顺序，单人物与多人物遵循同一框架：
 
 **单人物**：
-`[quality/meta/safety], [1girl/1boy], [character name], [series], [@artist], [hair], [eyes], [clothing], [body/pose], [expression], [action], [background/atmosphere], [composition tags]`
+`[quality/meta/safety], `
+`[1girl/1boy], [character name], [series], [@artist], [hair], [eyes], [clothing], [body/pose], [expression], [action], [background/atmosphere], [composition tags]`
 
 **多人物**（核心防串扰规则）：
-`[quality/meta/safety], [2girls / 1girl 1boy],`
+`[quality/meta/safety], `
+`[2girls / 1girl, 1boy], `
 然后为每个角色依次排列其专属属性：
 `[character_A name], [series_A], [A hair], [A eyes], [A clothing], [A body], [A expression],`
 `[character_B name], [series_B], [B hair], [B eyes], [B clothing], [B body], [B expression],`
 最后接共享标签：
-`[shared pose/action], [background], [atmosphere], [composition]`
+`[shared pose/action], [background], [atmosphere], [composition],[@artist]`
 
 ### 多人物特征分离规则（最关键）
 
 Anima 模型在多人场景中极易发生特征混淆（头发颜色、服装、体型在角色间串扰）。必须严格遵守以下规则：
 
-1. **角色属性必须按角色分组排列**。同一角色的发型、瞳色、服装、体型等必须连续出现后再切换到下一角色。严禁将不同角色的同类属性交叉排列（如"blue hair, red hair, short hair, long hair"这种形式会让模型无法分辨哪个头发属于哪个角色）。
+1. **角色属性必须按角色分组排列**。同一角色的发型、瞳色、服装、体型等必须连续出现后再切换到下一角色。严禁将不同角色的同类属性交叉排列（如"blue hair, red hair, short hair, long hair"这种形式会让模型无法分辨哪个头发属于哪个角色）。属于不同角色的属性之间换行。
 2. **自然语言段落必须为每个角色写一句"外观锚定短语"**。使用 "CharacterName with [key features]..." 的句式，明确指出视觉归属。例如："Holo with long brown hair and wolf ears sits on the left, while Lawrence with short silver hair and a merchant\'s cloak stands on the right." 这比仅靠 tag 的防串扰效果强得多。
 3. **使用空间方位词分离角色**。在自然语言中明确 left/right/foreground/background，帮助模型建立空间锚点。
-4. **为关键区分特征使用权重语法**。当两个角色的某个特征容易混淆时（如同一场景中的蓝发角色和红发角色），对区分性 tag 使用权重：`(blue hair:1.3), (red hair:1.3)`。Anima 的 Qwen 文本编码器支持权重语法，但需要比 SDXL 更高的数值（建议 1.3~2.0）。
+4. **为关键区分特征使用权重语法**。当两个角色的某个特征容易混淆时（如同一场景中的蓝发角色和红发角色），对区分性 tag 使用权重：`(blue hair:2), (red hair:2)`。Anima 的 Qwen 文本编码器支持权重语法，但需要比 SDXL 更高的数值（建议 2.0~3.0）。
 5. **角色外观必须在 tag 块中充分描述**。Anima 官方文档明确指出："Name a character, then describe their basic appearance. This is extra important when prompting for multiple characters. If you just list off character names with no description of appearance, the model can get confused."
 6. **自然语言中不重复 tag 已覆盖的内容**。自然语言的目的是补充 tag 无法表达的：空间关系、互动动作、光影氛围、构图取景。角色的发型、瞳色、服装等细节交给 tag。
+7. **不得书写矛盾的人数标签**。在多人场景下，你应该删除属于每个人的 `1girl`、`1boy`标签，使用一个描述总体的`2girl` 或 `3girl`等标签即可。
+
+### 标签互斥规则（冲突检查）
+
+以下标签对**不可同时出现**。组装标签时必须逐项检查。
+
+#### 视角互斥
+
+| 标签A | 标签B | 原因 |
+|---|---|---|
+| `from front` | `from behind` | 物理矛盾 |
+| `from above` | `from below` | 物理矛盾 |
+| `looking at viewer` | `facing away` | 视线矛盾 |
+| `pov` | `full body` | POV 不可能看到自己全身 |
+| `close-up` | `full body` | 景别矛盾 |
+
+#### 身份互斥
+
+| 标签A | 标签B | 原因 |
+|---|---|---|
+| `solo` | `hetero` / `1boy` / `yuri` | 单人不存在互动 |
+| `sleeping` / `unconscious` | `looking at viewer` | 无意识不可能直视 |
+| `blindfold` | `heart-shaped pupils` / `rolling eyes` | 看不到眼睛 |
+
+#### 服装互斥
+
+| 标签A | 标签B | 原因 |
+|---|---|---|
+| `completely nude` | 任何具体服装标签 | 全裸不穿衣 |
+| `pantyhose` | `barefoot` | 穿了丝袜不可能光脚（除非 `torn pantyhose`） |
+| `blindfold` | `glasses` | 物理冲突 |
+| 内衣套装 (`cat lingerie`, `lace lingerie`, `babydoll`, `negligee`, `chemise` 等) | `no panties` / `bottomless` | 内衣套装隐含包含内裤，模型优先解析套装忽略暴露标签；需暴露时拆为单件（`cat bra` + `no panties`） |
+
+> **不互斥**：外衣/制服（`maid outfit`、`school uniform`、`bunny suit`、`sailor uniform` 等）与 `no panties` / `bottomless` 完全兼容。
+
+#### 动作互斥
+
+| 标签A | 标签B | 原因 |
+|---|---|---|
+| `standing sex` | `lying` / `on back` | 体位矛盾 |
+| `missionary` | `doggystyle` | 不可能同时两个体位 |
+| `cowgirl position` | `prone bone` | 体位矛盾 |
+| `fellatio` | `cunnilingus`（同一人执行） | 嘴只有一张 |
+
+#### 细节标签过度（关键）
+
+同一身体部位同时堆叠多个细节标签会导致模型过度渲染，产生畸形。**每部位细节标签 ≤2 个，且不能互斥。**
+
+| 部位 | 矛盾组合 | 原因 |
+|---|---|---|
+| 脚趾 | `spread toes` + `toe scrunch` / `toes curling` | 舒展 vs 蜷缩 |
+| 脚趾 | `spread toes` + `feet together` | 分趾需要空间，合拢则压缩 |
+| 手指 | `spread fingers` + `clenched fist` / `gripping` | 张开 vs 握拳 |
+| 胸部 | `bouncing breasts` + `breasts squeeze together` | 弹跳 vs 挤压 |
+| 嘴巴 | `open mouth` + `clenched teeth` / `closed mouth` | 张嘴 vs 闭嘴 |
+| 眼睛 | `rolling eyes` + `looking at viewer` | 翻白眼 vs 直视 |
+| 腿部 | `spread legs` + `legs together` | 分开 vs 并拢 |
+| 足部整体 | 3 个以上足部标签（如 `foot focus` + `footjob` + `toe scrunch` + `spread toes`） | 过度细化导致畸形 |
+
+**原则**：同一部位的状态标签可以多个，但不能互斥。`barefoot` + `feet focus` + `soles` + `toe scrunch` 四个兼容标签没问题；`spread toes` + `toe scrunch` 两个就矛盾。
+
+### 最终自检清单
+
+prompt 组装完成后，提交前必须逐项自检，全部通过才可输出：
+
+| # | 检查项 | 通过标准 |
+|---|---|---|
+| 1 | **人数一致性** | `count/gender` 标签数量与实际角色数一致，无 `1boy, 2boys` 等矛盾 |
+| 2 | **互斥冲突** | 对照上方互斥表，无视角/身份/服装/动作/细节标签矛盾 |
+| 3 | **重复标签** | 同一标签不出现两次（强调靠权重语法，不靠重复） |
+| 4 | **场景合理性** | 场景标签与动作标签物理兼容（如 `underwater` 不能配 `cigarette`） |
+| 5 | **细节标签上限** | 同一身体部位细节标签 ≤2 个，且无互斥组合 |
+| 6 | **标签总数** | 单人 16-30 标签，双人 22-38，复杂多人 30-48 |
+| 7 | **风格一致性** | 服装、场景、氛围不出现跨世界观矛盾（如 `hanfu` 站在 `cyberpunk city`） |
+
+**自检流程**：组装完 → 逐项打勾 → 有冲突回退修改 → 全部通过才提交。
 
 ### 中文解释撰写规则
 
@@ -287,9 +369,28 @@ LOW_ASSEMBLY_PROMPT = """
 """
 
 
-def get_agent_system_prompt(mode, config):
+def get_format_tool_directive(mode):
+    """根据模式生成格式工具调用指令，注入 Agent 第一轮 user prompt。"""
+    if mode == "Anima":
+        tool_name = "get_anima_format"
+        format_desc = "Anima 模型的 Hybrid 混合提示词格式规范"
+    else:
+        tool_name = "get_newbie_format"
+        format_desc = "NewBie 模型的 XML 格式提示词规范"
+    return (
+        f"\n\n## 格式规范获取\n\n"
+        f"当前模式：**{mode}**。你必须在第一轮调用 `{tool_name}` 工具获取{format_desc}，"
+        f"然后再进行标签搜索和组装。格式工具的返回值是你组装最终 prompt 的权威参考。"
+    )
+
+
+def get_agent_system_prompt(mode, config, max_rounds=None):
     """
     构建 Agent 模式的完整系统提示词。
+    Args:
+        mode: "NewBie" 或 "Anima"
+        config: LPF_config.json 配置字典
+        max_rounds: Agent 模式的最大工具调用轮次，为 None 时不注入轮次预算提示
     Returns: (system_prompt, fewshot_user, fewshot_assistant)
     """
     today = date.today().strftime("%Y年%m月%d日")
@@ -305,9 +406,27 @@ def get_agent_system_prompt(mode, config):
         fewshot_assistant = config.get("fewshot_assistant", "")
         artists_anima = ""
 
+    # 构建轮次预算提示（仅在 Agent 模式注入）
+    if max_rounds:
+        round_budget_section = f"""
+## 轮次预算
+
+你最多只能调用 **{max_rounds} 轮**工具。请在预算内妥善规划执行路径：
+- 首轮尽量用并行搜索覆盖全部待搜索维度
+- 中间轮次用于关联挖掘和精准补充
+- 最后 1~2 轮收尾整合，准备输出最终结果
+- 预算过半时若关键标签仍未齐全，优先保证核心维度，舍弃边缘探索
+- 如果在 **{max_rounds} 轮** 内已经能给出可靠答案，请尽早结束。
+"""
+        # Agent 模式：格式规范由 MCP 工具动态获取，不注入硬编码内容
+        output_format = ""
+    else:
+        round_budget_section = ""
+
     system_content = _AGENT_SYSTEM_PROMPT_TEMPLATE.format(
         output_format_section=output_format,
         today=today,
+        round_budget_section=round_budget_section,
     )
 
     jailbreaker = config.get("gemini_jailbreaker", "")
