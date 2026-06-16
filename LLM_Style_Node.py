@@ -183,10 +183,10 @@ def format_artist_string(artist_str, mode):
 
     if mode == "NewBie":
         formatted = [format_tag_newbie(c, w) for c, w in tags]
+        return ', '.join(formatted)
     else:  # Anima
         formatted = [format_tag_anima(c, w) for c, w in tags]
-
-    return ', '.join(formatted)
+        return 'use the fixed style of ' + ' and '.join(formatted)
 
 
 def deduplicate_tags(base_tags, override_tags):
@@ -249,36 +249,41 @@ def _strip_anima_artists_from_text(text):
     return '\n'.join(lines), first_pos
 
 
-def inject_anima_style(prompt_text, artist_str, style_str):
+def inject_anima_style(prompt_text, artist_tags, style_str):
     """
     Inject artist and style into an Anima-mode plain text prompt.
     Rules:
       - Remove all existing @artist tags from prompt
-      - Insert new artists at the position of the first removed artist
+      - Append artist block at the end (before style)
       - Append style at the end
+      - Final order: [original prompt][artist injection][style injection]
       - If a field is empty, leave the original untouched
+    artist_tags: list of (content, weight) tuples, or None/empty
+    style_str: plain text style string
     """
-    if not artist_str.strip() and not style_str.strip():
+    has_artists = artist_tags and len(artist_tags) > 0
+    has_style = style_str and style_str.strip()
+
+    if not has_artists and not has_style:
         return prompt_text
 
-    formatted_artists = format_artist_string(artist_str, "Anima") if artist_str.strip() else ""
+    if has_artists:
+        formatted = [format_tag_anima(c, w) for c, w in artist_tags]
+        formatted_artists = 'use the fixed style of ' + ' and '.join(formatted)
+    else:
+        formatted_artists = ""
 
-    # Strip existing artists and find insertion point
-    cleaned_text, first_artist_pos = _strip_anima_artists_from_text(prompt_text)
+    # Strip existing artists
+    cleaned_text, _ = _strip_anima_artists_from_text(prompt_text)
 
     lines = cleaned_text.split('\n')
 
+    # Append artist at end (before style)
     if formatted_artists:
-        if first_artist_pos >= 0:
-            # Insert at the position where first artist was
-            lines.insert(first_artist_pos, formatted_artists)
-        else:
-            # No existing artists found, insert after first non-empty line
-            non_empty_idx = next((i for i, l in enumerate(lines) if l.strip()), 0)
-            lines.insert(non_empty_idx + 1, formatted_artists)
+        lines.append(formatted_artists)
 
     # Append style at end
-    if style_str.strip():
+    if has_style:
         lines.append(style_str.strip())
 
     return '\n'.join(lines)
@@ -346,12 +351,7 @@ class LLM_Xml_Style_Injector:
         target_style = combine_tags(style_add, preset_style)
 
         if mode == "Anima":
-            # Format artist tags for Anima
-            if target_artist_tags:
-                formatted_artist = ', '.join(format_tag_anima(c, w) for c, w in target_artist_tags)
-            else:
-                formatted_artist = ""
-            result = inject_anima_style(xml_input, formatted_artist, target_style)
+            result = inject_anima_style(xml_input, target_artist_tags or [], target_style)
             return (result,)
 
         # NewBie mode: XML injection

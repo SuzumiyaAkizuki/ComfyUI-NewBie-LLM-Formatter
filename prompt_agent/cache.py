@@ -88,6 +88,7 @@ def compute_edit(old_text: str, new_text: str) -> dict:
     ratio = sm.ratio()
 
     changes = []
+    new_terms = []   # 新增/替换后的目标词，供 Low 续写做精准查找（删除不产生）
     blocks = 0
     for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
@@ -98,15 +99,20 @@ def compute_edit(old_text: str, new_text: str) -> dict:
             old_seg = _clause_slice(old_text, old_toks, i1, i2)
             new_seg = _clause_slice(new_text, new_toks, j1, j2)
             changes.append(f"把「{old_seg}」改为「{new_seg}」")
+            new_terms.append(new_seg)
         elif tag == "delete":
             # 增/删：只取变更 token 本身，不扩展到相邻未变内容
             changes.append(f"删除「{_raw_slice(old_text, old_toks, i1, i2)}」")
         elif tag == "insert":
-            changes.append(f"增加「{_raw_slice(new_text, new_toks, j1, j2)}」")
+            new_seg = _raw_slice(new_text, new_toks, j1, j2)
+            changes.append(f"增加「{new_seg}」")
+            new_terms.append(new_seg)
 
     # 同一子句内的多处改动扩展后可能产生重复指令，去重保序
     seen = set()
     changes = [c for c in changes if not (c in seen or seen.add(c))]
+    seen2 = set()
+    new_terms = [t for t in new_terms if t and not (t in seen2 or seen2.add(t))]
 
     can_continue = 0 < blocks <= MAX_EDIT_BLOCKS and ratio >= MIN_SIMILARITY
     return {
@@ -114,6 +120,7 @@ def compute_edit(old_text: str, new_text: str) -> dict:
         "blocks": blocks,
         "ratio": ratio,
         "instruction": "；".join(changes),
+        "new_terms": new_terms,
     }
 
 

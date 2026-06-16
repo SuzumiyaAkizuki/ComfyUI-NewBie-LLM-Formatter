@@ -452,7 +452,8 @@ class PromptAgent:
             _log_error(f"回退模式 LLM 调用失败: {e}")
             raise
         _log_section("输出解析")
-        return self._parse_output(content)
+        xml_out, text_out = self._parse_output(content)
+        return xml_out, text_out, content
 
     # ── Low effort 子步骤（从 _run_low_effort 拆分） ─────────────────
 
@@ -553,8 +554,8 @@ class PromptAgent:
         return all_tag_names
 
     def _assemble_low_output(self, all_tag_names, tag_cn_map, user_text, user_tags, image):
-        """Step 4: 整合标签，LLM 组装最终 prompt，解析并缓存结果。
-        Returns (xml_out, text_out).
+        """Step 4: 整合标签，LLM 组装最终 prompt 并解析。
+        Returns (xml_out, text_out, content)。
         """
         _log_section("组装最终 prompt")
         from prompt_agent.agent_prompts import get_agent_system_prompt
@@ -571,8 +572,8 @@ class PromptAgent:
         tags_str = ", ".join(all_tag_names)
         user_content = "<user_message>\n" + user_text + "\n</user_message>"
         if user_tags:
-            user_content += "\n\n【用户已提供标签（直接信任，禁止搜索）】\n" + user_tags
-            user_content += "\n以上标签已由用户提供，禁止调用 search_tags 搜索这些标签或其变体。"
+            user_content += "\n\n【用户已提供标签（直接信任，禁止检索）】\n" + user_tags
+            user_content += "\n以上标签已由用户提供，直接使用，禁止检索这些标签或其变体。"
         user_content += "\n\n【预搜索标签集合】\n" + tags_str
 
         if image is not None:
@@ -600,7 +601,7 @@ class PromptAgent:
         xml_out, text_out = self._parse_output(content)
 
         _log_banner("Low effort 完成")
-        return xml_out, text_out
+        return xml_out, text_out, content
 
     # ── Low effort 主流程 ───────────────────────────────────────────
 
@@ -617,11 +618,15 @@ class PromptAgent:
             if pbar:
                 pbar.update_absolute(step)
 
-        # Step 1: 查询重写
+        # Step 1: 查询重写 + 确定性抽取已提供标签（不依赖重写 LLM 的 [已有] 识别）
         user_tags, dimensions = self._rewrite_query(user_text)
         if not dimensions:
             dimensions = [user_text]
             _log("查询重写未返回结果，使用原始输入")
+        provided_list, _ = self._collect_provided_tags(user_text, user_tags)
+        user_tags = ", ".join(provided_list)
+        if provided_list:
+            _log(f"确定性抽取到用户已提供标签 {len(provided_list)} 个，将禁止检索")
         _tick(1)
 
         # Step 2: 批量搜索标签
@@ -668,32 +673,28 @@ class PromptAgent:
         return content, forced_tokens
 
     def run(self, user_text, image=None):
-        if self.effort == "Low":
-            return self._run_low_effort(user_text, image)
+        # ── 基线判定（所有 effort 通用）：复用 / 续写 / 冷跑 ──
+        baseline = get_baseline_store().get(self.unique_id)
+        decision, edit = self._decide_baseline(baseline, user_text, image)
+        if decision == "reuse":
+            return self._parse_output(baseline["output"])
 
+        # Low effort：流水线冷跑 / 增量修订续写
+        if self.effort == "Low":
+            if decision == "continue":
+                xml_out, text_out, content = self._run_low_continuation(user_text, baseline, edit)
+            else:
+                xml_out, text_out, content = self._run_low_effort(user_text, image)
+            self._store_baseline(user_text, content, image,
+                                 baseline.get("format_spec") if baseline else None)
+            return xml_out, text_out
+
+        # Agent 模式：续写 / 冷跑
         _log_banner("Agent 模式已启用，开始处理用户输入...")
         _log(f"模式: {self.mode} | Effort: {self.effort} | MCP: HF (主) / MS (备)")
-
-        # ── 路径选择：增量修订续写 vs 冷跑（设计见 docs/incremental_revision_cache.md） ──
-        baseline = get_baseline_store().get(self.unique_id)
-        build = None
-        if (baseline and image is None
-                and baseline.get("mode") == self.mode
-                and not baseline.get("has_image")
-                and baseline.get("output")):
-            if normalize_prompt(user_text) == baseline.get("norm_input"):
-                _log_ok("输入与上次完全一致，直接复用上次结果（零调用）")
-                return self._parse_output(baseline["output"])
-            edit = compute_edit(baseline["raw_input"], user_text)
-            _log(f"与上次 diff：变更块={edit['blocks']}，相似度={edit['ratio']:.2f}")
-            if edit["blocks"] == 0:
-                # 仅标点/空白变化，无实义 token 改动 → 标签集合不变，直接复用
-                _log_ok("仅标点/空白变化，无实义改动，直接复用上次结果（零调用）")
-                return self._parse_output(baseline["output"])
-            if edit["continue"]:
-                build = self._build_continuation(baseline, edit)
-
-        if build is None:
+        if decision == "continue":
+            build = self._build_continuation(baseline, edit)
+        else:
             build = self._build_cold_run(user_text, image)
         messages, max_rounds, provided_norm = build
 
@@ -711,6 +712,103 @@ class PromptAgent:
 
         _log_banner(f"Agent 完成 | 总轮次: {rounds + 1} | 总 Token: {total_tokens}")
         return xml_out, text_out
+
+    def _decide_baseline(self, baseline, user_text, image):
+        """基线判定（所有 effort 通用）。返回 (decision, edit)：
+        decision ∈ {"reuse", "continue", "cold"}；continue 时附带 edit。
+        """
+        if not (baseline and image is None
+                and baseline.get("mode") == self.mode
+                and not baseline.get("has_image")
+                and baseline.get("output")):
+            return ("cold", None)
+        if normalize_prompt(user_text) == baseline.get("norm_input"):
+            _log_ok("输入与上次完全一致，直接复用上次结果（零调用）")
+            return ("reuse", None)
+        edit = compute_edit(baseline["raw_input"], user_text)
+        _log(f"与上次 diff：变更块={edit['blocks']}，相似度={edit['ratio']:.2f}")
+        if edit["blocks"] == 0:
+            # 仅标点/空白变化，无实义 token 改动 → 标签集合不变，直接复用
+            _log_ok("仅标点/空白变化，无实义改动，直接复用上次结果（零调用）")
+            return ("reuse", None)
+        if edit["continue"]:
+            return ("continue", edit)
+        return ("cold", None)
+
+    def _collect_provided_tags(self, user_text, rewrite_user_tags):
+        """合并确定性抽取（正则）与查询重写的 [已有] 标记，返回 (provided_list, provided_norm)。
+        确定性抽取不依赖重写 LLM，确保 LLM 漏标时已提供标签列表仍完整。
+        """
+        provided_list = utils.extract_provided_tags(user_text)
+        provided_norm = {utils.normalize_tag(t) for t in provided_list}
+        if rewrite_user_tags:
+            for t in rewrite_user_tags.split(","):
+                t = t.strip()
+                tn = utils.normalize_tag(t)
+                if t and tn not in provided_norm:
+                    provided_list.append(t)
+                    provided_norm.add(tn)
+        return provided_list, provided_norm
+
+    def _run_low_continuation(self, user_text, baseline, edit):
+        """Low 增量修订：对变更词做一次 full_scene 搜索（单轮、无关联探索），
+        LLM 在上一轮输出基础上单次修订。Returns (xml_out, text_out, content)。
+        """
+        _log_banner("Low 增量修订：在上一轮结果基础上修订")
+        _log(f"改动：{edit['instruction']}")
+
+        # 仅对新增/替换后的目标词做全场景搜索（full_scene，无 get_related_tags 关联）
+        candidate_tags = []
+        for term in edit.get("new_terms", []):
+            result = execute_search_tags(query=term, search_mode="full_scene", show_nsfw=True)
+            names = self._extract_tag_list(result)
+            if names:
+                candidate_tags.extend(names)
+                _log(f"  > 搜索变更词：{term} → {len(names)} 个候选", _C.GREEN)
+            else:
+                _log(f"  > 搜索变更词：{term} → 未找到", _C.WARNING)
+        seen = set()
+        candidate_tags = [t for t in candidate_tags if not (t in seen or seen.add(t))]
+
+        if self.mode == "Anima":
+            fmt_hint = "必须保留 `## Prompt` 和 `## 中文解释` 两个标题；`## 中文解释` 写完整设计说明。"
+        else:
+            fmt_hint = "保留同样的 `<img>` XML 代码块及其后的中文翻译。"
+        revise_directive = "用户在上一轮提示词的基础上做了如下修改：\n" + edit["instruction"]
+        if candidate_tags:
+            revise_directive += "\n\n为本次改动检索到的候选标签（按需选用）：\n" + ", ".join(candidate_tags)
+        revise_directive += (
+            "\n\n请在上一轮输出的基础上进行**最小化修订**：只改动与本次修改直接相关的标签，"
+            "其余标签与上一轮输出逐字保持一致。直接输出修订后的完整结果。"
+            + fmt_hint
+            + "禁止新增任何额外标题或说明段（如「改动说明」），禁止输出关于你做了哪些改动的解释。"
+        )
+
+        output_format = LOW_ASSEMBLY_PROMPT.format(
+            output_format_section=self._get_output_format_section(),
+        )
+        messages = [
+            {"role": "system", "content": output_format},
+            {"role": "user", "content": "<user_message>\n" + baseline["raw_input"] + "\n</user_message>"},
+            {"role": "assistant", "content": baseline["output"]},
+            {"role": "user", "content": revise_directive},
+        ]
+        try:
+            resp = self.llm.chat.completions.create(
+                model=self.model_name, messages=messages,
+                temperature=0.7, max_tokens=10240, extra_body=self._extra_body,
+            )
+            content = resp.choices[0].message.content or ""
+            if resp.usage:
+                self._log_token_usage(resp.usage)
+        except Exception as e:
+            _log_error(f"Low 修订 LLM 调用失败: {e}")
+            raise
+
+        _log_section("输出解析")
+        xml_out, text_out = self._parse_output(content)
+        _log_banner("Low 增量修订完成")
+        return xml_out, text_out, content
 
     def _build_cold_run(self, user_text, image):
         """冷跑路径：构造完整初始消息（查询重写、已提供标签、格式指令、图片）。
@@ -736,16 +834,7 @@ class PromptAgent:
         user_content = "<user_message>\n" + user_text + "\n</user_message>"
 
         # 用户已提供标签：确定性抽取（正则）+ 查询重写的 [已有] 标记，取并集。
-        # 确定性抽取不依赖重写 LLM，确保 LLM 漏标时禁止重复检索的列表仍完整。
-        provided_list = utils.extract_provided_tags(user_text)
-        provided_norm = {utils.normalize_tag(t) for t in provided_list}
-        if user_tags:
-            for t in user_tags.split(","):
-                t = t.strip()
-                tn = utils.normalize_tag(t)
-                if t and tn not in provided_norm:
-                    provided_list.append(t)
-                    provided_norm.add(tn)
+        provided_list, provided_norm = self._collect_provided_tags(user_text, user_tags)
         provided_str = ", ".join(provided_list)
         if provided_list:
             _log(f"确定性抽取到用户已提供标签 {len(provided_list)} 个，将禁止重复检索")
