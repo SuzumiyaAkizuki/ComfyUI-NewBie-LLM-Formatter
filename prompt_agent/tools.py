@@ -35,7 +35,8 @@ _MCP_URL_HF = "https://sakizuki-danboorusearch.hf.space/mcp/mcp"
 _MCP_URL_MS = "https://sakizuki-danboorusearchonline.ms.show/mcp/mcp"
 _TIMEOUT = 90
 
-# 当前活跃端点，模块启动时默认 HF；_rpc 调用失败时自动回退
+# 最近一次实际服务的 MCP 端点（仅供 get_active_endpoint / 健康展示）。
+# 调用顺序固定 HF 优先、MS 兜底（见 _rpc），不再用它作粘性首选。
 _active_url: str = _MCP_URL_HF
 
 # 保护 _active_url 并发写入
@@ -140,14 +141,13 @@ _HEADERS_BASE = {
     "Accept":       "application/json, text/event-stream",
 }
 
-def _new_session_id(url: str | None = None) -> str:
+def _new_session_id(client: httpx.Client, url: str) -> str:
+    """在给定 client 上发送 initialize 握手，返回服务器分配的 session id。
+
+    **关键**：握手与随后的 tools/call 复用同一个 client（同一持久连接），
+    使两步落在**同一 HF 副本**。否则 HF 多副本部署下，握手与调用走不同连接、
+    被 LB 路由到不同副本，session id 跨副本失配导致请求失败、误判 HF 不可用。
     """
-    发送 initialize 握手，返回服务器分配的 session id。
-    每次工具调用前重新握手，不跨请求复用——HF Space 多副本部署时
-    同一 session id 可能被路由到不同副本导致 404。
-    """
-    if url is None:
-        url = _active_url
     payload = {
         "jsonrpc": "2.0",
         "id":      0,
@@ -158,12 +158,7 @@ def _new_session_id(url: str | None = None) -> str:
             "capabilities":    {},
         },
     }
-    resp = httpx.post(
-        url,
-        json=payload,
-        headers=_HEADERS_BASE,
-        timeout=_TIMEOUT,
-    )
+    resp = client.post(url, json=payload, headers=_HEADERS_BASE)
     session_id = resp.headers.get("mcp-session-id")
     if not session_id:
         resp.raise_for_status()
@@ -187,45 +182,41 @@ def _parse_response(resp: httpx.Response) -> dict:
 
 
 def _rpc(method: str, params: dict, req_id: int = 1) -> dict:
-    """
-    握手 + 发送 JSON-RPC 请求，两步用同一个 session id 完成。
-    优先使用 _active_url，失败时自动切换到备用端点重试。
+    """握手 + JSON-RPC 调用；二者复用同一连接（同一副本）。
+
+    端点顺序**固定 HF 优先、MS 兜底**——不再用粘性的 _active_url 作首选，
+    避免 HF 一次偶发失败后被永久流放到 MS。_active_url 仅记录"最近一次实际服务
+    的端点"，供健康展示。
     """
     global _active_url
 
-    urls_to_try = [_active_url]
-    fallback = _MCP_URL_MS if _active_url == _MCP_URL_HF else _MCP_URL_HF
-    urls_to_try.append(fallback)
-
     last_error = None
-    for url in urls_to_try:
+    for url in (_MCP_URL_HF, _MCP_URL_MS):
         try:
-            session_id = _new_session_id(url)
-            payload = {
-                "jsonrpc": "2.0",
-                "id":      req_id,
-                "method":  method,
-                "params":  params,
-            }
-            resp = httpx.post(
-                url,
-                json=payload,
-                headers={**_HEADERS_BASE, "mcp-session-id": session_id},
-                timeout=_TIMEOUT,
-            )
-            resp.raise_for_status()
-            rpc_resp = _parse_response(resp)
+            # 单次 _rpc 用一个 client，握手与调用共用一条连接 → 同一副本
+            with httpx.Client(timeout=_TIMEOUT) as client:
+                session_id = _new_session_id(client, url)
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id":      req_id,
+                    "method":  method,
+                    "params":  params,
+                }
+                resp = client.post(
+                    url,
+                    json=payload,
+                    headers={**_HEADERS_BASE, "mcp-session-id": session_id},
+                )
+                resp.raise_for_status()
+                rpc_resp = _parse_response(resp)
 
             if "error" in rpc_resp:
                 raise RuntimeError(rpc_resp["error"].get("message", f"{method} 返回错误"))
 
-            # 成功——如果用的不是当前活跃端点，切换过去
-            if url != _active_url:
-                tag = "ms" if url == _MCP_URL_MS else "hf"
-                print(f"[tools] 主端点不可用，已切换到 {tag.upper()} 端点", file=sys.stderr)
-                with _lock:
-                    _active_url = url
-
+            if url == _MCP_URL_MS:
+                print("[tools] HF 端点本次失败，已回退 MS", file=sys.stderr)
+            with _lock:
+                _active_url = url  # 记录本次实际服务端点（供健康展示）
             return rpc_resp.get("result", {})
 
         except Exception as e:
