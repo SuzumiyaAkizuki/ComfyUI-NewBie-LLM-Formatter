@@ -13,7 +13,7 @@
 <details open>
 <summary><h2 style="display:inline">重要更新：Agent 模式（v1.2.9 新增）</h2></summary>
 
-传统模式下，LLM 只能凭训练记忆生成标签，容易产生幻觉（编造不存在的标签）或遗漏关键属性。**Agent 模式**让 LLM 在生成提示词的过程中调用[DanbooruSearchOnline](https://huggingface.co/spaces/SAkizuki/DanbooruSearch)的MCP服务，**实时搜索 Danbooru 标签库**，像人类一样查找、验证、补充标签，最终输出一套精确、完整的提示词。
+传统模式下LLM 只能凭训练记忆生成标签，容易产生幻觉（编造不存在的标签）或遗漏关键属性。**Agent 模式**让 LLM 在生成提示词的过程中调用[DanbooruSearchOnline](https://huggingface.co/spaces/SAkizuki/DanbooruSearch)的MCP服务，**实时搜索 Danbooru 标签库**，像人类一样查找、验证、补充标签，最终输出一套精确、完整的提示词。
 
 ### 具体行为
 
