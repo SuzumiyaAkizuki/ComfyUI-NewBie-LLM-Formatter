@@ -28,8 +28,7 @@ from prompt_agent.tools import (
     execute_get_newbie_format,
 )
 from prompt_agent.cache import (
-    get_cache, extract_tags_from_output,
-    format_cached_tags, cached_tags_plain, build_tag_entry,
+    get_baseline_store, compute_edit, normalize as normalize_prompt,
 )
 from prompt_agent import utils
 
@@ -41,6 +40,18 @@ except ImportError:
     _COMFY_AVAILABLE = False
 
 MAX_ROUNDS = 10
+
+# 信息增量停滞检测：某轮搜索新增的「未见过」标签少于此阈值，记为一次停滞轮
+_STAGNATION_MIN_NEW = 3
+# 连续停滞轮次达到此值时，提前结束 Agent 探索并强制收尾输出
+_STAGNATION_LIMIT = 2
+# 单次工具返回中「新标签占比」低于此值时，向模型回灌"该方向已充分覆盖"的提示
+_LOW_NOVELTY_RATIO = 0.34
+# 搜索结果前 K 名（prompt 字段按匹配强度降序）若命中用户已提供标签，
+# 判定为「重搜已覆盖概念」并回灌提示。取小而绝对的 K 以避免弱共现误报。
+_PROVIDED_TOPK = 3
+# 增量修订续写时的工具轮次上限：局部修订不需要全量轮次
+_REVISION_MAX_ROUNDS = 3
 
 
 def _sanitize_messages_for_gemini(messages):
@@ -190,11 +201,11 @@ def _split_by_language(text):
 # Effort 级别配置
 # Low   = 流水线模式，不走 Agent 循环，用 full_scene 批量搜索
 # Medium = Agent 循环，默认 full_scene 平衡召回质量与轮次收敛速度
-# High   = Agent 循环，默认 concept_explore 宽召回，更多轮次深入探索
+# High   = Agent 循环，默认 full_scene，更多轮次深入探索 + wiki 释义
 _EFFORT_CONFIG = {
-    "Low":    {"search_mode": "full_scene",      "related_limit": 50},
-    "Medium": {"search_mode": "full_scene",      "related_limit": 30, "max_rounds": 8},
-    "High":   {"search_mode": "concept_explore", "related_limit": 50, "max_rounds": 10, "include_wiki": True},
+    "Low":    {"search_mode": "full_scene", "related_limit": 50},
+    "Medium": {"search_mode": "full_scene", "related_limit": 30, "max_rounds": 8},
+    "High":   {"search_mode": "full_scene", "related_limit": 50, "max_rounds": 10, "include_wiki": True},
 }
 
 
@@ -234,41 +245,54 @@ class PromptAgent:
     def _rewrite_query(self, question):
         _log_section("查询重写")
         prompt = QUERY_REWRITE_PROMPT.format(question=question)
-        raw = None
-        try:
-            resp = self.llm.chat.completions.create(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=500,
-                extra_body=self._extra_body,
-            )
-            raw = resp.choices[0].message.content
-            if raw is None:
-                _log_warn("查询重写 LLM 返回空响应")
-                return "", []
-            raw = raw.strip().strip("```json").strip("```").strip()
-            variants = json.loads(raw)
-            if isinstance(variants, list):
-                user_tags = ""
-                dimensions = []
-                for v in variants:
-                    v = str(v).strip()
-                    if not v:
+
+        # 尝试两次：第一次带 extra_body，第二次去掉 reasoning 参数
+        extra_body_list = [self._extra_body]
+        if self._extra_body.get("reasoning"):
+            extra_body_list.append({k: v for k, v in self._extra_body.items() if k != "reasoning"})
+
+        for attempt, extra_body in enumerate(extra_body_list):
+            raw = None
+            try:
+                resp = self.llm.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=2048,
+                    extra_body=extra_body,
+                )
+                raw = resp.choices[0].message.content
+                if not raw or not raw.strip():
+                    if attempt == 0 and len(extra_body_list) > 1:
+                        _log_warn("查询重写返回空响应，去掉 reasoning 参数重试...")
                         continue
-                    if v.startswith("[已有]"):
-                        user_tags = v.replace("[已有]", "").strip()
-                        _log(f"  [已有] 用户标签: {user_tags[:80]}...")
-                    else:
-                        dimensions.append(v)
-                _log(f"用户输入拆解为 {len(dimensions)} 个搜索维度 + {'已有标签' if user_tags else '无已有标签'}")
-                for i, q in enumerate(dimensions, 1):
-                    _log(f"  {i}. {q}")
-                return user_tags, dimensions
-        except Exception as e:
-            _log_warn(f"查询重写失败（已跳过）: {e}")
-            if raw is not None:
-                _log_warn(f"LLM 响应体: {raw[:500]}")
+                    _log_warn("查询重写 LLM 返回空响应，跳过重写")
+                    return "", []
+                raw = raw.strip().strip("```json").strip("```").strip()
+                variants = json.loads(raw)
+                if isinstance(variants, list):
+                    user_tags = ""
+                    dimensions = []
+                    for v in variants:
+                        v = str(v).strip()
+                        if not v:
+                            continue
+                        if v.startswith("[已有]"):
+                            user_tags = v.replace("[已有]", "").strip()
+                            _log(f"  [已有] 用户标签: {user_tags[:80]}...")
+                        else:
+                            dimensions.append(v)
+                    _log(f"用户输入拆解为 {len(dimensions)} 个搜索维度 + {'已有标签' if user_tags else '无已有标签'}")
+                    for i, q in enumerate(dimensions, 1):
+                        _log(f"  {i}. {q}")
+                    return user_tags, dimensions
+            except Exception as e:
+                if attempt == 0 and len(extra_body_list) > 1:
+                    _log_warn(f"查询重写失败（{e}），去掉 reasoning 参数重试...")
+                    continue
+                _log_warn(f"查询重写失败（已跳过）: {e}")
+                if raw is not None:
+                    _log_warn(f"LLM 响应体: {raw[:500]}")
         return "", []
 
     def _execute_tool(self, name, args):
@@ -365,6 +389,30 @@ class PromptAgent:
             pass
 
     @staticmethod
+    def _extract_tag_list(result_str: str) -> list[str]:
+        """保序提取标签列表。`prompt` 字段按 MCP 端打分降序排列，
+        顺序即匹配强度，供"已覆盖概念重搜"的前 K 名判据使用。
+        缺失时回退到 `results[].tag`。
+        """
+        try:
+            data = json.loads(result_str)
+        except Exception:
+            return []
+        prompt = data.get("prompt")
+        if isinstance(prompt, str) and prompt.strip():
+            return [t.strip() for t in prompt.split(",") if t.strip()]
+        return [
+            (t.get("tag") or "").strip()
+            for t in data.get("results", [])
+            if (t.get("tag") or "").strip()
+        ]
+
+    @staticmethod
+    def _extract_tag_names(result_str: str) -> set[str]:
+        """从工具返回中提取标签名集合，用于信息增量统计（顺序无关）。"""
+        return set(PromptAgent._extract_tag_list(result_str))
+
+    @staticmethod
     def _collect_cn_from_result(result_str: str) -> dict[str, str]:
         """从工具返回的 JSON 中提取 {tag: cn_name} 映射。"""
         mapping = {}
@@ -384,10 +432,6 @@ class PromptAgent:
         if self.mode == "Anima":
             return _ANIMA_OUTPUT_FORMAT
         return _NEWBIE_OUTPUT_FORMAT
-
-    def _get_today(self):
-        from datetime import date
-        return date.today().strftime("%Y年%m月%d日")
 
     def _fallback_normal(self, user_text, image):
         _log_warn("回退为普通模式（无工具调用）")
@@ -516,7 +560,6 @@ class PromptAgent:
         from prompt_agent.agent_prompts import get_agent_system_prompt
         output_format = LOW_ASSEMBLY_PROMPT.format(
             output_format_section=self._get_output_format_section(),
-            today=self._get_today(),
         )
         _, fewshot_user, fewshot_assistant = get_agent_system_prompt(self.mode, self.config)
 
@@ -524,17 +567,6 @@ class PromptAgent:
         if fewshot_user and fewshot_assistant:
             assembly_messages.append({"role": "user", "content": fewshot_user})
             assembly_messages.append({"role": "assistant", "content": fewshot_assistant})
-
-        # 缓存注入
-        cached = get_cache().lookup(user_text)
-        if cached:
-            cached_tags = cached_tags_plain(cached["tags"])
-            all_tag_names = cached_tags + all_tag_names
-            for t in cached["tags"]:
-                if isinstance(t, dict) and t.get("c"):
-                    if t["t"] not in tag_cn_map:
-                        tag_cn_map[t["t"]] = t["c"]
-            _log(f"缓存命中: 注入 {len(cached_tags)} 个标签")
 
         tags_str = ", ".join(all_tag_names)
         user_content = "<user_message>\n" + user_text + "\n</user_message>"
@@ -566,19 +598,6 @@ class PromptAgent:
 
         _log_section("输出解析")
         xml_out, text_out = self._parse_output(content)
-
-        # 存入缓存
-        try:
-            plain_tags = extract_tags_from_output(xml_out, self.mode)
-            if plain_tags:
-                tags_with_cn = [
-                    build_tag_entry(t, tag_cn_map.get(t, ""))
-                    for t in plain_tags
-                ]
-                get_cache().store(user_text, tags_with_cn, self.mode)
-                _log(f"已缓存 {len(tags_with_cn)} 个标签（含 {len(tag_cn_map)} 个中文参考）")
-        except Exception:
-            pass  # 缓存写入失败不影响主流程
 
         _log_banner("Low effort 完成")
         return xml_out, text_out
@@ -621,6 +640,33 @@ class PromptAgent:
         _tick(4)
         return result
 
+    def _force_final_output(self, messages):
+        """收尾：要求模型基于已收集标签直接输出，禁止再调工具。
+
+        返回 (content, total_tokens)。复用于两种收尾场景：
+        max_rounds 耗尽、以及信息增量停滞提前结束。
+        """
+        if _COMFY_AVAILABLE:
+            comfy.model_management.throw_exception_if_processing_interrupted()
+        messages.append({
+            "role": "user",
+            "content": "请根据已收集到的标签信息直接输出最终 prompt，禁止再调用任何工具。",
+        })
+        try:
+            resp = self.llm.chat.completions.create(
+                model=self.model_name,
+                messages=_sanitize_messages_for_gemini(messages),
+                temperature=0.7, max_tokens=10240, extra_body=self._extra_body,
+            )
+            content = resp.choices[0].message.content or ""
+            forced_tokens = resp.usage.total_tokens if resp.usage else 0
+            if resp.usage:
+                self._log_token_usage(resp.usage)
+        except Exception as e:
+            _log_error(f"强制输出 LLM 调用失败: {e}")
+            raise
+        return content, forced_tokens
+
     def run(self, user_text, image=None):
         if self.effort == "Low":
             return self._run_low_effort(user_text, image)
@@ -628,8 +674,49 @@ class PromptAgent:
         _log_banner("Agent 模式已启用，开始处理用户输入...")
         _log(f"模式: {self.mode} | Effort: {self.effort} | MCP: HF (主) / MS (备)")
 
+        # ── 路径选择：增量修订续写 vs 冷跑（设计见 docs/incremental_revision_cache.md） ──
+        baseline = get_baseline_store().get(self.unique_id)
+        build = None
+        if (baseline and image is None
+                and baseline.get("mode") == self.mode
+                and not baseline.get("has_image")
+                and baseline.get("output")):
+            if normalize_prompt(user_text) == baseline.get("norm_input"):
+                _log_ok("输入与上次完全一致，直接复用上次结果（零调用）")
+                return self._parse_output(baseline["output"])
+            edit = compute_edit(baseline["raw_input"], user_text)
+            _log(f"与上次 diff：变更块={edit['blocks']}，相似度={edit['ratio']:.2f}")
+            if edit["blocks"] == 0:
+                # 仅标点/空白变化，无实义 token 改动 → 标签集合不变，直接复用
+                _log_ok("仅标点/空白变化，无实义改动，直接复用上次结果（零调用）")
+                return self._parse_output(baseline["output"])
+            if edit["continue"]:
+                build = self._build_continuation(baseline, edit)
+
+        if build is None:
+            build = self._build_cold_run(user_text, image)
+        messages, max_rounds, provided_norm = build
+
+        content, rounds, total_tokens, captured_spec = self._run_agent_loop(
+            messages, max_rounds, provided_norm,
+        )
+
+        _log_section("输出解析")
+        xml_out, text_out = self._parse_output(content)
+
+        # 压平存档：本次结果成为下次 diff 的基线（每节点只存上一次）。
+        # 格式规范：本轮抓到的优先，否则沿用上一轮基线的（跨续写链保留，不重复调 MCP）。
+        fmt_spec = captured_spec or (baseline.get("format_spec") if baseline else None)
+        self._store_baseline(user_text, content, image, fmt_spec)
+
+        _log_banner(f"Agent 完成 | 总轮次: {rounds + 1} | 总 Token: {total_tokens}")
+        return xml_out, text_out
+
+    def _build_cold_run(self, user_text, image):
+        """冷跑路径：构造完整初始消息（查询重写、已提供标签、格式指令、图片）。
+        Returns (messages, max_rounds, provided_norm)。
+        """
         max_rounds = self._effort_cfg["max_rounds"]
-        pbar = comfy.utils.ProgressBar(max_rounds, node_id=self.unique_id) if _COMFY_AVAILABLE else None
 
         rewrite_queries = []
         user_tags = ""
@@ -648,39 +735,37 @@ class PromptAgent:
 
         user_content = "<user_message>\n" + user_text + "\n</user_message>"
 
-        # 用户已提供标签（来自查询重写）
+        # 用户已提供标签：确定性抽取（正则）+ 查询重写的 [已有] 标记，取并集。
+        # 确定性抽取不依赖重写 LLM，确保 LLM 漏标时禁止重复检索的列表仍完整。
+        provided_list = utils.extract_provided_tags(user_text)
+        provided_norm = {utils.normalize_tag(t) for t in provided_list}
         if user_tags:
-            user_content += "\n\n【用户已提供标签（直接信任，禁止搜索）】\n" + user_tags
+            for t in user_tags.split(","):
+                t = t.strip()
+                tn = utils.normalize_tag(t)
+                if t and tn not in provided_norm:
+                    provided_list.append(t)
+                    provided_norm.add(tn)
+        provided_str = ", ".join(provided_list)
+        if provided_list:
+            _log(f"确定性抽取到用户已提供标签 {len(provided_list)} 个，将禁止重复检索")
+
+        if provided_str:
+            user_content += "\n\n【用户已提供标签（直接信任，禁止检索）】\n" + provided_str
             if not rewrite_queries:
                 # 所有输入都是用户已有标签，无额外维度需要搜索 → 跳过工具调用
                 user_content += (
-                    "\n\n用户输入已覆盖全部要素，你不需要调用任何工具。"
-                    "禁止调用 search_tags 或 get_related_tags。"
-                    "直接将上述标签进行标准化处理（空格→下划线、括号转义等），按格式要求整理输出即可。"
+                    "\n\n上述标签已覆盖全部要素，无需调用任何工具。"
+                    "直接将上述标签标准化（空格→下划线、括号转义等）后按格式要求输出即可。"
                 )
             else:
                 user_content += (
-                    "\n\n搜索边界：上述已有标签已覆盖部分维度（如人设、角色、服装等）。"
-                    "你**只需要**搜索以下待搜索维度中提及的内容，**禁止**重新检索已有标签已覆盖的概念。"
+                    "\n\n上述标签已覆盖部分维度（如人设、角色、服装等），直接信任、禁止检索；"
+                    "你**只需要**检索下方【待搜索维度】中的内容。"
                 )
-            _log(f"检测到用户已提供标签: {len(user_tags.split(','))} 个")
+            _log(f"已注入禁止检索的已提供标签: {len(provided_list)} 个")
         if rewrite_queries:
-            user_content += "\n\n【待搜索维度（仅搜索以下内容，禁止搜索已有标签已覆盖的概念）】\n" + "\n".join("- " + q for q in rewrite_queries)
-
-
-        # 缓存注入：从相似历史查询中获取的标签
-        cached = get_cache().lookup(user_text)
-        cached_plain = []
-        if cached:
-            cached_plain = cached_tags_plain(cached["tags"])
-            cached_formatted = format_cached_tags(cached["tags"])
-            user_content += (
-                "\n\n【已缓存标签（来自相似查询，可直接使用，禁止重复查询）】\n"
-                + cached_formatted + "\n"
-                + "以下标签来自相似查询的最终结果，已经过大模型验证，确认存在且准确。禁止重复查询可被已缓存标签覆盖的内容。"
-                + "标签后方【】内为中文参考，仅供你理解含义，不要将【】内容当作标签的一部分。"
-            )
-            _log(f"缓存命中: 注入 {len(cached['tags'])} 个标签")
+            user_content += "\n\n【待搜索维度（仅检索以下内容，禁止检索已覆盖概念）】\n" + "\n".join("- " + q for q in rewrite_queries)
 
         # 注入格式工具调用指令（根据 mode 动态选择）
         user_content += get_format_tool_directive(self.mode)
@@ -695,10 +780,84 @@ class PromptAgent:
         else:
             messages.append({"role": "user", "content": user_content})
 
+        return messages, max_rounds, provided_norm
+
+    def _build_continuation(self, baseline, edit):
+        """增量修订续写：把上次(提示词→输出)作为对话上文，追加改动指令。
+        Returns (messages, max_rounds, provided_norm)。
+        """
+        _log_banner("增量修订模式：在上一轮结果基础上续写")
+        _log(f"改动：{edit['instruction']}")
+        max_rounds = _REVISION_MAX_ROUNDS
+        system_content, _, _ = get_agent_system_prompt(
+            self.mode, self.config, max_rounds=max_rounds,
+        )
+        # 复用上一轮已抓取、随基线保留的格式规范（不额外调 MCP），
+        # 否则续写只能模仿上一轮输出，易偏离标题/结构（如 ### 中文解释、改动说明）。
+        spec = baseline.get("format_spec")
+        if spec:
+            system_content += (
+                "\n\n# 输出格式规范（权威参考，标题与整体结构必须严格遵守）\n\n" + spec
+            )
+        if self.mode == "Anima":
+            fmt_hint = (
+                "必须保留 `## Prompt` 和 `## 中文解释` 两个标题；"
+                "`## 中文解释` 段照常写完整的中文设计说明（针对最终成品，不是改动清单）。"
+            )
+        else:
+            fmt_hint = "保留同样的 `<img>` XML 代码块及其后的中文翻译。"
+        revise_directive = (
+            "用户在上一轮提示词的基础上做了如下修改：\n"
+            + edit["instruction"]
+            + "\n\n请在上一轮输出的基础上进行**最小化修订**："
+            "只改动与本次修改直接相关的标签，其余标签与上一轮输出逐字保持一致。"
+            "新出现的维度可调用工具检索；未改动、已确定的维度禁止改动、禁止重新检索。\n\n"
+            "**输出要求（严格）**：直接输出修订后的**完整结果**，结构与标题必须与上一轮输出逐字一致。"
+            + fmt_hint
+            + "禁止新增任何额外标题或说明段（例如「改动说明」「修改说明」），"
+            "禁止输出任何关于你做了哪些改动的解释。"
+        )
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": "<user_message>\n" + baseline["raw_input"] + "\n</user_message>"},
+            {"role": "assistant", "content": baseline["output"]},
+            {"role": "user", "content": revise_directive},
+        ]
+        # 续写不启用已提供标签机制（模型在做修订，而非首轮检索）
+        return messages, max_rounds, set()
+
+    def _store_baseline(self, user_text, content, image, format_spec=None):
+        """压平：把本次(提示词→最终输出)存为新基线，供下次 diff 续写。
+
+        format_spec 随基线保留（不丢弃格式规范），续写时直接复用，避免重复调 MCP。
+        """
+        if not content or not content.strip():
+            return
+        try:
+            get_baseline_store().put(self.unique_id, {
+                "norm_input": normalize_prompt(user_text),
+                "raw_input": user_text,
+                "output": content,
+                "mode": self.mode,
+                "has_image": image is not None,
+                "format_spec": format_spec,
+            })
+        except Exception:
+            pass  # 基线写入失败不影响主流程
+
+    def _run_agent_loop(self, messages, max_rounds, provided_norm):
+        """执行 Agent 工具循环。Returns (content, rounds, total_tokens)。"""
+        pbar = comfy.utils.ProgressBar(max_rounds, node_id=self.unique_id) if _COMFY_AVAILABLE else None
+
         rounds = 0
         total_tokens = 0
         duplicate_tracker = {}
         tag_cn_map: dict[str, str] = {}
+        seen_tags: set[str] = set()      # 累计已见过的标签，用于信息增量统计
+        stagnant_rounds = 0              # 连续低信息增量轮次计数
+        stagnated = False                # 因停滞而提前结束的标志
+        content = ""
+        captured_format = None           # 本轮抓到的 get_*_format 规范，随基线保留供续写复用
 
         while rounds < max_rounds:
             if _COMFY_AVAILABLE:
@@ -739,12 +898,22 @@ class PromptAgent:
                         args = json.loads(raw_args) if raw_args else {}
                     except json.JSONDecodeError:
                         args = {}
+                    # 守卫：search_tags 查询命中用户已提供标签 → 不执行，回灌"已提供"提示
+                    if name == "search_tags":
+                        qn = utils.normalize_tag(str(args.get("query", "")))
+                        if qn and qn in provided_norm:
+                            _log_warn(f"搜索查询「{args.get('query', '')}」命中用户已提供标签，跳过执行")
+                            skipped.append((tc, json.dumps(
+                                {"skipped": "user_provided",
+                                 "note": "该标签用户已提供，禁止重复搜索，直接使用用户提供的版本即可。"},
+                                ensure_ascii=False)))
+                            continue
                     call_key = name + ":" + json.dumps(args, sort_keys=True)
                     count = duplicate_tracker.get(call_key, 0) + 1
                     duplicate_tracker[call_key] = count
                     if count > 3:
                         _log_warn(f"检测到重复调用 {name}（第{count}次），跳过执行")
-                        skipped.append(tc)
+                        skipped.append((tc, json.dumps({"skipped": "duplicate"}, ensure_ascii=False)))
                         continue
                     parsed.append((tc, name, args))
                 if not parsed:
@@ -781,29 +950,78 @@ class PromptAgent:
                     for tc, _, _ in parsed:
                         messages.append({"role": "tool", "tool_call_id": tc["id"],
                                          "content": json.dumps({"error": str(e)}, ensure_ascii=False)})
-                    for tc in skipped:
+                    for tc, skip_content in skipped:
                         messages.append({"role": "tool", "tool_call_id": tc["id"],
-                                         "content": json.dumps({"skipped": "duplicate"}, ensure_ascii=False)})
+                                         "content": skip_content})
                     break
-                # 非重复调用：写入实际结果
+                # 非重复调用：写入实际结果，并统计本轮信息增量
+                round_returned: set[str] = set()  # 本轮所有搜索/关联返回的标签
                 for (tc, name, args), result in zip(parsed, results):
                     self._log_tool_call(name, args)
                     self._log_tool_result(name, result)
                     tag_cn_map.update(self._collect_cn_from_result(result))
+                    if name in ("get_anima_format", "get_newbie_format"):
+                        captured_format = result  # 保留格式规范供续写复用
+                    if name in ("search_tags", "get_related_tags"):
+                        returned_list = self._extract_tag_list(result)
+                        returned = set(returned_list)
+                        if returned:
+                            # 已覆盖概念重搜检测：结果前 K 名（按匹配强度降序）命中用户
+                            # 已提供标签 → 说明在搜用户已覆盖的概念（即使 query 是中文，
+                            # 也能通过返回的英文强匹配标签命中）。弱共现排在后面不会误报。
+                            if provided_norm:
+                                top_hit = [
+                                    t for t in returned_list[:_PROVIDED_TOPK]
+                                    if utils.normalize_tag(t) in provided_norm
+                                ]
+                                if top_hit:
+                                    result = result + (
+                                        f"\n\n[系统提示] 本次结果中排名最靠前的标签 "
+                                        f"{', '.join(top_hit)} 属于用户已提供标签，"
+                                        f"说明你正在搜索用户已覆盖的概念。用户已提供的标签禁止重复检索，"
+                                        f"请勿再搜索该概念，转向尚未覆盖的维度或直接输出。"
+                                    )
+                            # 新标签 = 既不在历史已见、也不在本轮更早调用里
+                            new_in_call = returned - seen_tags - round_returned
+                            round_returned |= returned
+                            # 新增占比过低：在该 tool 结果末尾回灌停滞信号给模型
+                            if len(new_in_call) / len(returned) < _LOW_NOVELTY_RATIO:
+                                result = result + (
+                                    f"\n\n[系统提示] 本次返回 {len(returned)} 个标签，"
+                                    f"其中仅 {len(new_in_call)} 个为新标签，其余均已在先前轮次出现。"
+                                    f"该主题/维度已充分覆盖，请勿换措辞重复搜索同一主题，"
+                                    f"转向尚未覆盖的维度，或直接输出最终结果。"
+                                )
                     messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
-                # 被跳过的重复调用：写入占位 response，保证一一对应
-                for tc in skipped:
+                # 被跳过的调用（重复 / 命中已提供标签）：写入占位 response，保证一一对应
+                for tc, skip_content in skipped:
                     messages.append({"role": "tool", "tool_call_id": tc["id"],
-                                     "content": json.dumps({"skipped": "duplicate"}, ensure_ascii=False)})
+                                     "content": skip_content})
+
+                # 信息增量停滞检测：连续多轮搜索几乎无新标签 → 提前收尾
+                round_new = len(round_returned - seen_tags)
+                round_had_search = len(round_returned) > 0
+                seen_tags |= round_returned
+                if round_had_search and round_new < _STAGNATION_MIN_NEW:
+                    stagnant_rounds += 1
+                    _log_warn(
+                        f"低信息增量轮次（本轮新增 {round_new} 个标签），"
+                        f"停滞计数 {stagnant_rounds}/{_STAGNATION_LIMIT}"
+                    )
+                else:
+                    stagnant_rounds = 0
+
                 rounds += 1
                 if pbar:
                     pbar.update_absolute(rounds)
+
+                if stagnant_rounds >= _STAGNATION_LIMIT:
+                    _log_warn("连续低信息增量，提前结束探索，进入收尾输出")
+                    stagnated = True
+                    break
+
                 remaining = max_rounds - rounds
-                progress_msg = (
-                    f"【轮次进度】你最多可调用 {max_rounds} 轮工具，"
-                    f"现已完成第 {rounds} 轮（剩余 {remaining} 轮）。"
-                    f"请根据剩余轮次调整搜索策略，避免超预算后被强制截断。"
-                )
+                progress_msg = f"【轮次进度】第 {rounds}/{max_rounds} 轮，剩余 {remaining} 轮。"
                 messages.append({"role": "user", "content": progress_msg})
                 continue
 
@@ -811,40 +1029,15 @@ class PromptAgent:
             break
         else:
             _log_error(f"Agent 循环超过最大轮次 ({max_rounds})，强制输出")
-            if _COMFY_AVAILABLE:
-                comfy.model_management.throw_exception_if_processing_interrupted()
-            messages.append({"role": "user", "content": "请根据已收集到的标签信息直接输出最终 prompt，禁止再调用任何工具。"})
-            try:
-                resp = self.llm.chat.completions.create(
-                    model=self.model_name, messages=messages, temperature=0.7,
-                    max_tokens=10240, extra_body=self._extra_body,
-                )
-                content = resp.choices[0].message.content or ""
-                if resp.usage:
-                    total_tokens += resp.usage.total_tokens
-                    self._log_token_usage(resp.usage)
-            except Exception as e:
-                _log_error(f"强制输出 LLM 调用失败: {e}")
-                raise
+            content, forced_tokens = self._force_final_output(messages)
+            total_tokens += forced_tokens
 
-        _log_section("输出解析")
-        xml_out, text_out = self._parse_output(content)
+        # 因信息增量停滞而提前跳出：同样强制收尾输出
+        if stagnated:
+            content, forced_tokens = self._force_final_output(messages)
+            total_tokens += forced_tokens
 
-        # 存入缓存（带 cn_name）
-        try:
-            plain_tags = extract_tags_from_output(xml_out, self.mode)
-            if plain_tags:
-                tags_with_cn = [
-                    build_tag_entry(t, tag_cn_map.get(t, ""))
-                    for t in plain_tags
-                ]
-                get_cache().store(user_text, tags_with_cn, self.mode)
-                _log(f"已缓存 {len(tags_with_cn)} 个标签（含 {len(tag_cn_map)} 个中文参考）")
-        except Exception:
-            pass  # 缓存写入失败不影响主流程
-
-        _log_banner(f"Agent 完成 | 总轮次: {rounds + 1} | 总 Token: {total_tokens}")
-        return xml_out, text_out
+        return content, rounds, total_tokens, captured_format
 
     def _parse_output(self, content):
         if self.mode == "Anima":
@@ -853,17 +1046,28 @@ class PromptAgent:
 
     def _parse_anima_output(self, content):
         _log("Anima 模式: 按 Markdown 标题分割输出")
-        prompt_match = re.search(r'##\s*Prompt\s*\n(.*?)(?=##\s*中文解释|\Z)', content, re.DOTALL)
-        explanation_match = re.search(r'##\s*中文解释\s*\n(.*)', content, re.DOTALL)
+        # 标题统一用 #{2,} 容忍层级差异（模型偶尔写 ### 而非 ##）。
+        # Prompt 段：## Prompt 到「下一个标题行」或结尾——用通用标题边界，避免第二段标题
+        # 被改写（如 ### 中文解释 / ## 改动说明）时 Prompt 段把它整段吸入。
+        prompt_match = re.search(r'#{2,}\s*Prompt\s*\n(.*?)(?=\n#{2,}|\Z)', content, re.DOTALL)
+        # 解释段：优先「中文解释」标题；缺失时回退为「第二个标题之后的正文」，
+        # 兼容续写偶尔把标题写成「改动说明」等的情况。
+        explanation_match = re.search(r'#{2,}\s*中文解释\s*\n(.*)', content, re.DOTALL)
+        expl_text = explanation_match.group(1) if explanation_match else None
+        if expl_text is None:
+            headings = list(re.finditer(r'(?m)^#{2,}[^\n]*\n', content))
+            if len(headings) >= 2:  # headings[0]=Prompt 标题, headings[1]=解释段标题
+                expl_text = content[headings[1].end():]
+                _log_warn("第二个标题非「中文解释」，已按位置回退提取解释段")
 
-        if prompt_match and explanation_match:
+        if prompt_match and expl_text is not None:
             xml_out = utils.strip_code_fences(prompt_match.group(1))
-            text_out = utils.strip_code_fences(explanation_match.group(1))
+            text_out = utils.strip_code_fences(expl_text)
             _log_ok(f"成功按标题分割: Prompt={len(xml_out)} chars, 解释={len(text_out)} chars")
         elif prompt_match:
             xml_out = utils.strip_code_fences(prompt_match.group(1))
             text_out = ""
-            _log_warn("未找到 ## 中文解释 标题，仅提取 Prompt 部分")
+            _log_warn("未找到解释段标题，仅提取 Prompt 部分")
         else:
             _log_warn("未找到 ## Prompt 标题，回退到按行分离中英文")
             xml_out, text_out = _split_by_language(content)

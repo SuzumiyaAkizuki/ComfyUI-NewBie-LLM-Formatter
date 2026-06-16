@@ -147,6 +147,49 @@ def split_by_language(text):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 用户已提供标签的确定性抽取（防止 Agent 重复检索）
+# ═══════════════════════════════════════════════════════════════════
+
+# 合法 Danbooru 标签 token：全小写 ASCII、无空格，可含下划线/括号/数字等。
+# 中文、含空格的自然语言短句（如 "depth of field"）天然不匹配，因此被排除。
+_PROVIDED_TAG_RE = re.compile(r"^[a-z0-9][a-z0-9_().:'+\-]*$")
+
+
+def normalize_tag(tag):
+    """归一化标签用于比较：小写、去转义括号、空格→下划线。
+
+    使 "white hair" / "white_hair" / "Serafuku" 归一到同一形式，
+    供「用户已提供标签」与搜索查询/返回标签做集合比较。
+    """
+    t = (tag or "").strip().lower()
+    t = t.replace("\\(", "(").replace("\\)", ")")
+    t = t.replace(" ", "_")
+    return t
+
+
+def extract_provided_tags(text):
+    """从用户原始输入中确定性地抽取已提供的 Danbooru 标签。
+
+    按逗号/顿号/换行切分，凡是「无空格的全小写 token」即视为用户已提供标签。
+    自然语言（中文、含空格的英文短句）不会被误抽。返回保序去重的标签列表。
+
+    不依赖查询重写 LLM，确保即使 LLM 漏标 [已有]，禁止重复检索的列表仍完整。
+    """
+    provided = []
+    seen = set()
+    for chunk in re.split(r"[,\n，、]", text):
+        tok = chunk.strip()
+        if not tok or len(tok) < 2 or " " in tok:
+            continue
+        if _PROVIDED_TAG_RE.match(tok.lower()):
+            key = normalize_tag(tok)
+            if key and key not in seen:
+                seen.add(key)
+                provided.append(tok)
+    return provided
+
+
+# ═══════════════════════════════════════════════════════════════════
 # DUP-3: NewBie 模式输出解析（三级提取策略）
 # ═══════════════════════════════════════════════════════════════════
 

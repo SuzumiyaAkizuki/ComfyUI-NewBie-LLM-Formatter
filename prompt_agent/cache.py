@@ -1,302 +1,163 @@
 """
 prompt_agent/cache.py
 ---------------------
-提示词缓存模块。
+增量修订基线存储 + 提示词 diff 判据。
 
-匹配策略：字符集 Jaccard 相似度（中文语义感知，O(n+m)）。
-持久化：有界 JSON 全量快照，跨 ComfyUI 会话保留。
+替代旧的相似度注入式缓存。每个节点只保存最近一次成功运行的"基线"
+（提示词 + 最终输出）。下次运行时与之做 diff：
+  - 完全相同        → 直接复用上次输出（零调用）
+  - 小改（块数/相似度达标） → 续写式修订，复用上次结果只改动相关部分
+  - 大改 / 模式或图片变化   → 冷跑
+
+设计见 docs/incremental_revision_cache.md。
 """
 
 from __future__ import annotations
 
-import collections
-import json
-import os
+import difflib
 import re
 import threading
-import tempfile
 
 
-# ── 缓存文件路径 ──────────────────────────────────────────────────
+# ── diff 判据阈值（设计文档 §五/§十） ──────────────────────────────
+MAX_EDIT_BLOCKS = 2      # 独立变更块数上限：≈ 改动了几个维度
+MIN_SIMILARITY = 0.4     # 词级相似度地板：防止"1 块但近乎整段重写"
 
-_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".prompt_cache.json")
+
+# token 切分（diff 用），优先级从上到下：
+#   ① 带权重的括号组 (a,b,c:1.2) / (1girl:2) —— 整组作为一个 token（权重作用于整组，
+#      改权重或改组内标签都让该 token 变化，指令带上完整的组，避免误解作用范围）
+#   ② ASCII 词，可带 :权重 后缀（无括号的 tag:1.2，把权重并入而非拆成 1、2）
+#   ③ 每个 CJK 字符单独一个
+# 标点、空白作为分隔符被丢弃，不参与 diff（避免标点差异产生伪变更块）。
+_TOKEN_RE = re.compile(
+    r"\([^()]*:\d+(?:\.\d+)?\)"
+    r"|[A-Za-z0-9_]+(?::\d+(?:\.\d+)?)?"
+    r"|[一-鿿]"
+)
+
+
+def normalize(text: str) -> str:
+    """归一化提示词用于存储 / 完全相同判定：去首尾空白、合并连续空白、小写。"""
+    return re.sub(r"\s+", " ", (text or "").strip()).lower()
+
+
+def _tokenize(text: str) -> list[tuple]:
+    """返回 [(lower, start, end)]，保留原文字符偏移以便回切可读原文。"""
+    return [(m.group(0).lower(), m.start(), m.end()) for m in _TOKEN_RE.finditer(text or "")]
+
+
+def _raw_slice(text: str, toks: list[tuple], i1: int, i2: int) -> str:
+    """只回切变更 token 区间本身的原文（不扩展），用于「增加」「删除」指令。
+
+    增/删若像替换那样向两侧扩展到子句，会把相邻的**未变**内容也写进指令
+    （如「白发少女→白发蓝瞳少女」误成「增加白发蓝瞳少女」），故增/删不扩展。
+    """
+    if i1 >= i2:
+        return ""
+    return text[toks[i1][1]:toks[i2 - 1][2]].strip()
+
+
+def _clause_slice(text: str, toks: list[tuple], i1: int, i2: int) -> str:
+    """把变更 token 区间扩展到所在「子句」后回切原文，用于消歧。
+
+    子句 = 无间隔字符的连续 token 串（被标点/空白隔断即为边界）。
+    只给「白」在「白发，白色水手服」里无法定位是哪一个，扩展为「白发」即可定位。
+    """
+    if i1 >= i2:
+        return ""
+    while i1 > 0 and text[toks[i1 - 1][2]:toks[i1][1]] == "":
+        i1 -= 1
+    while i2 < len(toks) and text[toks[i2 - 1][2]:toks[i2][1]] == "":
+        i2 += 1
+    return text[toks[i1][1]:toks[i2 - 1][2]].strip()
+
+
+def compute_edit(old_text: str, new_text: str) -> dict:
+    """对比新旧提示词。返回 {continue, blocks, ratio, instruction}。
+
+    continue=True 表示属"小改"，可走增量修订续写；
+    instruction 为给模型的自然语言改动说明。
+    """
+    old_toks = _tokenize(old_text)
+    new_toks = _tokenize(new_text)
+    sm = difflib.SequenceMatcher(
+        a=[t[0] for t in old_toks], b=[t[0] for t in new_toks], autojunk=False,
+    )
+    opcodes = sm.get_opcodes()
+    ratio = sm.ratio()
+
+    changes = []
+    blocks = 0
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            continue
+        blocks += 1
+        if tag == "replace":
+            # 替换：两侧都扩展到子句，对称展示，使改动可唯一定位（消歧）
+            old_seg = _clause_slice(old_text, old_toks, i1, i2)
+            new_seg = _clause_slice(new_text, new_toks, j1, j2)
+            changes.append(f"把「{old_seg}」改为「{new_seg}」")
+        elif tag == "delete":
+            # 增/删：只取变更 token 本身，不扩展到相邻未变内容
+            changes.append(f"删除「{_raw_slice(old_text, old_toks, i1, i2)}」")
+        elif tag == "insert":
+            changes.append(f"增加「{_raw_slice(new_text, new_toks, j1, j2)}」")
+
+    # 同一子句内的多处改动扩展后可能产生重复指令，去重保序
+    seen = set()
+    changes = [c for c in changes if not (c in seen or seen.add(c))]
+
+    can_continue = 0 < blocks <= MAX_EDIT_BLOCKS and ratio >= MIN_SIMILARITY
+    return {
+        "continue": can_continue,
+        "blocks": blocks,
+        "ratio": ratio,
+        "instruction": "；".join(changes),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
-# PromptCache
+# 基线存储：每节点保存最近一次运行（进程内，按 unique_id 键）
 # ═══════════════════════════════════════════════════════════════════
 
-class PromptCache:
-    """提示词缓存：LRU 淘汰 + 字符集 Jaccard 匹配 + 磁盘持久化。
+class BaselineStore:
+    """每个节点只保存最近一次成功运行的基线。
 
-    使用字符级 unigram Jaccard：中文语序宽松，阈值 0.35 平衡召回率与精确度。
+    Baseline 字段：
+        norm_input  归一化提示词（完全相同判定 + diff 对比）
+        raw_input   原始提示词（续写时作为 [user] 上文）
+        output      上次最终输出全文（续写时作为 [assistant] 上文）
+        mode        "NewBie" / "Anima"
+        has_image   上次是否带图（回退判定）
     """
 
-    def __init__(self, max_size: int = 50, lookup_threshold: float = 0.35,
-                 dedup_threshold: float = 0.92):
-        self._cache: collections.OrderedDict = collections.OrderedDict()
-        self._max_size = max_size
-        self._lookup_threshold = lookup_threshold
-        self._dedup_threshold = dedup_threshold
+    def __init__(self):
+        self._by_node: dict[str, dict] = {}
         self._lock = threading.Lock()
 
-    # ── 字符集 Jaccard ───────────────────────────────────────────
-
-    @staticmethod
-    def _to_charset(text: str) -> set[str]:
-        """提取文本的字符集合。保留中文字符、ASCII 字母数字。"""
-        return set(re.sub(r"[^一-鿿\w]", "", text.lower()))
-
-    @staticmethod
-    def _jaccard(a: str, b: str) -> float:
-        """字符集 Jaccard 相似度。"""
-        set_a = PromptCache._to_charset(a)
-        set_b = PromptCache._to_charset(b)
-        if not set_a and not set_b:
-            return 1.0
-        if not set_a or not set_b:
-            return 0.0
-        intersection = set_a & set_b
-        union = set_a | set_b
-        return len(intersection) / len(union)
-
-    # ── 查询与存储 ──────────────────────────────────────────────
-
-    def lookup(self, user_input: str) -> dict | None:
-        """查找最相似缓存条目。短输入走 exact match。"""
-        if not self._cache or not user_input:
+    def get(self, node_id) -> dict | None:
+        if node_id is None:
             return None
-
-        inp = user_input.strip()
-        if len(inp) <= 5:
-            entry = self._cache.get(inp)
-            if entry is not None:
-                self._cache.move_to_end(inp)
-                return {"tags": entry["tags"], "mode": entry["mode"]}
-            return None
-
-        best_key, best_score = None, 0.0
         with self._lock:
-            for key in self._cache:
-                score = self._jaccard(inp, key)
-                if score > best_score:
-                    best_key, best_score = key, score
+            return self._by_node.get(str(node_id))
 
-        if best_key is None or best_score < self._lookup_threshold:
-            return None
-
-        with self._lock:
-            entry = self._cache.pop(best_key)
-            self._cache[best_key] = entry
-        return {"tags": entry["tags"], "mode": entry["mode"]}
-
-    def store(self, user_input: str, tags: list, mode: str):
-        """存储条目。近乎相同（≥0.92）则覆盖旧条目。"""
-        if not user_input or not tags:
+    def put(self, node_id, baseline: dict):
+        if node_id is None:
             return
-
         with self._lock:
-            for key in list(self._cache.keys()):
-                if self._jaccard(user_input, key) >= self._dedup_threshold:
-                    del self._cache[key]
-                    break
-
-            if len(self._cache) >= self._max_size:
-                self._cache.popitem(last=False)
-
-            self._cache[user_input] = {"tags": tags, "mode": mode}
-
-        self._flush_to_disk()
+            self._by_node[str(node_id)] = baseline
 
     def clear(self):
         with self._lock:
-            self._cache.clear()
-        self._flush_to_disk()
-
-    def __len__(self) -> int:
-        return len(self._cache)
-
-    def __contains__(self, key: str) -> bool:
-        return key in self._cache
-
-    # ── 磁盘持久化 ──────────────────────────────────────────────
-
-    def _flush_to_disk(self):
-        """全量写入 JSON（temp file + rename 原子替换）。所有异常静默，不影响主流程。"""
-        try:
-            with self._lock:
-                entries = [[k, v] for k, v in self._cache.items()]
-            data = json.dumps(entries, ensure_ascii=False, indent=2)
-            d = os.path.dirname(_CACHE_FILE)
-            fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(data)
-            os.replace(tmp, _CACHE_FILE)
-        except Exception:
-            pass
-
-    def _load_from_disk(self):
-        """从 JSON 快照恢复缓存。"""
-        if not os.path.exists(_CACHE_FILE):
-            return
-        try:
-            with open(_CACHE_FILE, "r", encoding="utf-8") as f:
-                entries = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            try:
-                os.remove(_CACHE_FILE)
-            except OSError:
-                pass
-            return
-        with self._lock:
-            for item in entries:
-                if not isinstance(item, list) or len(item) != 2:
-                    continue
-                key, value = item
-                if not isinstance(key, str) or not isinstance(value, dict):
-                    continue
-                if "tags" not in value or "mode" not in value:
-                    continue
-                if len(self._cache) >= self._max_size:
-                    self._cache.popitem(last=False)
-                self._cache[key] = value
+            self._by_node.clear()
 
 
-# ═══════════════════════════════════════════════════════════════════
-# 模块级单例
-# ═══════════════════════════════════════════════════════════════════
-
-_prompt_cache: PromptCache | None = None
+_baseline_store: BaselineStore | None = None
 
 
-def get_cache() -> PromptCache:
-    global _prompt_cache
-    if _prompt_cache is None:
-        _prompt_cache = PromptCache(max_size=50)
-        _prompt_cache._load_from_disk()
-    return _prompt_cache
-
-
-def reset_cache():
-    global _prompt_cache
-    if _prompt_cache is not None:
-        _prompt_cache.clear()
-    _prompt_cache = PromptCache(max_size=50)
-    _prompt_cache._load_from_disk()
-
-
-# ═══════════════════════════════════════════════════════════════════
-# 标签提取工具
-# ═══════════════════════════════════════════════════════════════════
-
-
-def extract_tags_from_output(xml_out: str, mode: str) -> list[str]:
-    if not xml_out or not xml_out.strip():
-        return []
-    if mode == "Anima":
-        return _extract_anima_tags(xml_out)
-    return _extract_newbie_tags(xml_out)
-
-
-def _extract_newbie_tags(xml_string: str) -> list[str]:
-    from lxml import etree
-    tags = []
-    try:
-        root = etree.fromstring(xml_string.encode("utf-8"))
-    except etree.XMLSyntaxError:
-        parser = etree.XMLParser(recover=True)
-        try:
-            root = etree.fromstring(xml_string.encode("utf-8"), parser=parser)
-        except Exception:
-            return []
-    _collect_leaf_text(root, tags)
-    result = []
-    for text in tags:
-        for part in re.split(r"[,\n]+", text):
-            tag = part.strip().rstrip(",")
-            if not tag:
-                continue
-            if _is_placeholder(tag):
-                continue
-            if tag.startswith("(") and ")" in tag:
-                continue
-            tag = re.sub(r"[:：]\d+\.?\d*$", "", tag)
-            tag = tag.strip()
-            if tag and len(tag) > 1:
-                result.append(tag)
-    return _deduplicate_preserve_order(result)
-
-
-def _collect_leaf_text(element, accumulator: list):
-    children = list(element)
-    if not children:
-        text = (element.text or "").strip()
-        if text:
-            accumulator.append(text)
-    else:
-        for child in children:
-            _collect_leaf_text(child, accumulator)
-        tail = (element.tail or "").strip()
-        if tail:
-            accumulator.append(tail)
-
-
-def _is_placeholder(text: str) -> bool:
-    placeholders = {
-        "...", "角色名", "人数标签", "画风标签", "背景标签",
-        "画面情绪、氛围标签", "各种物品", "其它标签", "其他标签",
-        "英文场景描述", "性别标签", "外貌特征", "衣着",
-        "表情", "动作", "位置", "画师标签",
-    }
-    if text in placeholders:
-        return True
-    if len(text) > 8 and re.search(r"[，。；：]", text):
-        return True
-    return False
-
-
-def _extract_anima_tags(xml_out: str) -> list[str]:
-    parts = xml_out.split("\n\n", 1)
-    tag_block = parts[0] if parts else xml_out
-    tags = []
-    for tag in tag_block.split(","):
-        tag = tag.strip()
-        if not tag:
-            continue
-        if " " in tag and len(tag) > 40:
-            continue
-        tags.append(tag)
-    return _deduplicate_preserve_order(tags)
-
-
-def format_cached_tags(tags: list) -> str:
-    parts = []
-    for t in tags:
-        if isinstance(t, dict) and t.get('c'):
-            parts.append(f'{t["t"]}【{t["c"]}】')
-        elif isinstance(t, dict):
-            parts.append(t.get('t', str(t)))
-        else:
-            parts.append(str(t))
-    return ', '.join(parts)
-
-
-def cached_tags_plain(tags: list) -> list:
-    return [t['t'] if isinstance(t, dict) else t for t in tags]
-
-
-def build_tag_entry(tag: str, cn_name: str = '') -> dict:
-    first_cn = cn_name.split(',')[0].strip() if cn_name else ''
-    return {'t': tag, 'c': first_cn}
-
-
-def _deduplicate_preserve_order(items: list[str]) -> list[str]:
-    seen = set()
-    result = []
-    for item in items:
-        if item not in seen:
-            seen.add(item)
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
+def get_baseline_store() -> BaselineStore:
+    global _baseline_store
+    if _baseline_store is None:
+        _baseline_store = BaselineStore()
+    return _baseline_store
