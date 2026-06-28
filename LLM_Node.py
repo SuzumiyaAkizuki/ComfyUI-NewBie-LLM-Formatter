@@ -131,6 +131,7 @@ class LLM_Prompt_Formatter:
                 "thinking": ("BOOLEAN", {"default": False}),
                 "mode": (["NewBie", "Anima"],),
                 "agent_effort": (["Close", "Low", "Medium", "High"],),
+                "force_full_agent_run": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "image": ("IMAGE",),
@@ -299,7 +300,7 @@ class LLM_Prompt_Formatter:
 
     # ── 主方法 ─────────────────────────────────────────────────────────
 
-    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, image=None, unique_id=None):
+    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, force_full_agent_run=False, image=None, unique_id=None):
         config = load_api_config()
         final_key, final_url = self._resolve_credentials(config, api_key, api_url)
 
@@ -312,7 +313,7 @@ class LLM_Prompt_Formatter:
                     mode=mode, thinking=thinking, config=config, effort=agent_effort,
                     unique_id=unique_id,
                 )
-                return agent.run(user_text, image=image)
+                return agent.run(user_text, image=image, force_full_run=force_full_agent_run)
             except comfy.model_management.InterruptProcessingException:
                 raise
             except Exception as e:

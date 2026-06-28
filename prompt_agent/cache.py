@@ -6,7 +6,7 @@ prompt_agent/cache.py
 替代旧的相似度注入式缓存。每个节点只保存最近一次成功运行的"基线"
 （提示词 + 最终输出）。下次运行时与之做 diff：
   - 完全相同        → 直接复用上次输出（零调用）
-  - 小改（块数/相似度达标） → 续写式修订，复用上次结果只改动相关部分
+  - 小改（相似度达标） → 续写式修订，复用上次结果只改动相关部分
   - 大改 / 模式或图片变化   → 冷跑
 
 设计见 docs/incremental_revision_cache.md。
@@ -20,8 +20,7 @@ import threading
 
 
 # ── diff 判据阈值（设计文档 §五/§十） ──────────────────────────────
-MAX_EDIT_BLOCKS = 2      # 独立变更块数上限：≈ 改动了几个维度
-MIN_SIMILARITY = 0.4     # 词级相似度地板：防止"1 块但近乎整段重写"
+MIN_SIMILARITY = 0.55    # 词级相似度地板：防止近乎整段重写
 
 
 # token 切分（diff 用），优先级从上到下：
@@ -73,6 +72,37 @@ def _clause_slice(text: str, toks: list[tuple], i1: int, i2: int) -> str:
     return text[toks[i1][1]:toks[i2 - 1][2]].strip()
 
 
+# CJK 括号对（开/闭），用于修复 _raw_slice 截断后的孤儿括号
+_CJK_BRACKET_PAIRS = {"《": "》", "「": "」", "『": "』", "【": "】", "（": "）"}
+
+
+def _expand_adjacent_cjk_brackets(text: str, toks: list[tuple], j1: int, j2: int) -> str:
+    """对 _raw_slice 的结果向外扩展相邻的 CJK 括号对。
+
+    _TOKEN_RE 不匹配 CJK 标点，所以 _raw_slice 可能把配对标点截断：
+    《蔚蓝档案》风格的平涂 → 截出 '蔚蓝档案》风格的平涂'（缺《）。
+    本函数把区间向两侧扩展到最近的配对标点，修复此问题。
+    """
+    if j1 >= j2:
+        return ""
+    start = toks[j1][1]
+    end = toks[j2 - 1][2]
+    # 向前扩展：如果 start 前面是某个开括号，检查其闭括号在区间内
+    if start > 0:
+        ch = text[start - 1]
+        closing = _CJK_BRACKET_PAIRS.get(ch)
+        if closing and closing in text[start:end]:
+            start -= 1
+    # 向后扩展：如果 end 位置是某个闭括号，检查其开括号在区间内
+    if end < len(text):
+        ch = text[end]
+        for opening, closing in _CJK_BRACKET_PAIRS.items():
+            if ch == closing and opening in text[start:end]:
+                end += 1
+                break
+    return text[start:end].strip()
+
+
 def compute_edit(old_text: str, new_text: str) -> dict:
     """对比新旧提示词。返回 {continue, blocks, ratio, instruction}。
 
@@ -104,8 +134,26 @@ def compute_edit(old_text: str, new_text: str) -> dict:
             # 增/删：只取变更 token 本身，不扩展到相邻未变内容
             changes.append(f"删除「{_raw_slice(old_text, old_toks, i1, i2)}」")
         elif tag == "insert":
-            new_seg = _raw_slice(new_text, new_toks, j1, j2)
-            changes.append(f"增加「{new_seg}」")
+            # 修复孤儿 CJK 括号：token 匹配不到《》等标点，
+            # _raw_slice 可能截出「蔚蓝档案》风格」这种缺左括号的片段；
+            # 向外扩展到相邻的 CJK 括号对。
+            new_seg = _expand_adjacent_cjk_brackets(new_text, new_toks, j1, j2)
+            # 取插入点上下文，让模型知道在哪里插入
+            is_end = j2 >= len(new_toks)
+            if is_end:
+                # 末尾插入：取最后一个 token 的子句，用「后」
+                old_ctx = _clause_slice(old_text, old_toks, i1 - 1, i1) if i1 > 0 else ""
+                if old_ctx:
+                    changes.append(f"在「{old_ctx}」后增加「{new_seg}」")
+                else:
+                    changes.append(f"增加「{new_seg}」")
+            else:
+                # 中间插入：取插入点前的子句，用「前」
+                old_ctx = _clause_slice(old_text, old_toks, i1 - 1, i1) if i1 > 0 else ""
+                if old_ctx:
+                    changes.append(f"在「{old_ctx}」前增加「{new_seg}」")
+                else:
+                    changes.append(f"增加「{new_seg}」")
             new_terms.append(new_seg)
 
     # 同一子句内的多处改动扩展后可能产生重复指令，去重保序
@@ -114,7 +162,7 @@ def compute_edit(old_text: str, new_text: str) -> dict:
     seen2 = set()
     new_terms = [t for t in new_terms if t and not (t in seen2 or seen2.add(t))]
 
-    can_continue = 0 < blocks <= MAX_EDIT_BLOCKS and ratio >= MIN_SIMILARITY
+    can_continue = 0 < blocks and ratio >= MIN_SIMILARITY
     return {
         "continue": can_continue,
         "blocks": blocks,
@@ -168,3 +216,5 @@ def get_baseline_store() -> BaselineStore:
     if _baseline_store is None:
         _baseline_store = BaselineStore()
     return _baseline_store
+
+

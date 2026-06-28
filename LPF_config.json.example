@@ -18,223 +18,278 @@
   "styles": {
     "2024顶级画师混搭 (Rella & WLOP)": {
       "artist": "rella, maccha_(mochancc), tidsean, wlop, ciloranko, atdan, year2024",
-      "style": "anime_style,realistic_shading"
+      "style": "anime_style,realistic_shading",
+      "mode": "NewBie"
     },
     "Min与Rurudo风格化集": {
       "artist": "min_(120716), [rurudo], [jacknife]",
-      "style": "anime_style,realistic_shading"
+      "style": "anime_style,realistic_shading",
+      "mode": "NewBie"
     },
     "氛围感数字绘画 (Rain_sama & Ask)": {
       "artist": "ame929, rain_sama, (konya_karasue:0.35), (zhibuji_loom:0.25), ask_(askzy), void_0, omone_hokoma, agm, dino_artforame",
-      "style": "anime_style,realistic_shading"
+      "style": "anime_style,realistic_shading",
+      "mode": "NewBie"
     },
     "Kidmo与2024概念风格": {
       "artist": "kidmo, jvn, xilmo, dino(dinoartforame), void0, ask_(askzy)",
-      "style": "rain_sama, konya_karasue"
+      "style": "rain_sama, konya_karasue",
+      "mode": "NewBie"
     },
     "中式传统美学幻想风": {
       "artist": "ame929, rain_sama, (konya_karasue:0.35), (zhibuji_loom:0.25), ask_(askzy), void_0, omone_hokoma, agm, dino_(dinoartforame)",
-      "style": "digital painting, painterly, anime style, high detail, fantasy, traditional Chinese aesthetic"
+      "style": "digital painting, painterly, anime style, high detail, fantasy, traditional Chinese aesthetic",
+      "mode": "NewBie"
     },
     "精细绘本感萌系风格": {
       "artist": "ame929, rain_sama, (konya_karasue:0.35), (zhibuji_loom:0.25), ask_(askzy), void_0, omone_hokoma, agm, dino(dinoartforame)",
-      "style": "anime style, digital art, incredibly detailed, painterly, moe"
+      "style": "anime style, digital art, incredibly detailed, painterly, moe",
+      "mode": "NewBie"
     },
     "鲜艳对比色 (陈彬 & Sho)": {
       "artist": "[chen_bin], [sho_(sho_lwlw)], [ningen_mame], [tianliang_duohe_fangdongye], [[ciloranko]], [[rella]], [[konya_karasue]], takeuchitakashi",
-      "style": "anime style, vibrant colors, high contrast, crisp"
+      "style": "anime style, vibrant colors, high contrast, crisp",
+      "mode": "NewBie"
     },
     "清新动漫风格": {
       "artist": "ame929, rain_sama, (konya_karasue:0.35), (zhibuji_loom:0.25), ask_zy, void_0, omone_hokoma, agm, dino_artforame",
-      "style": "anime style, fresh style"
+      "style": "anime style, fresh style",
+      "mode": "NewBie"
     },
     "生动写实光影 (Min & Jacknife)": {
       "artist": "min_(120716), [rurudo], [jacknife]",
-      "style": "vibrant colors, realistic lighting"
+      "style": "vibrant colors, realistic lighting",
+      "mode": "NewBie"
     },
     "混合赛璐璐美少女风格": {
       "artist": "ame929, rain_sama, (konya_karasue:0.35), (zhibuji_loom:0.25), ask_(askzy), void0, omone_hokoma, agm, dino(dinoartforame)",
-      "style": "Japanese anime bishoujo illustration, Key Visual style, semi-painterly, cel-shading hybrid rendering"
+      "style": "Japanese anime bishoujo illustration, Key Visual style, semi-painterly, cel-shading hybrid rendering",
+      "mode": "NewBie"
     },
     "清爽鲜艳风 (Pottsness & Rella)": {
       "artist": "pottsness, midori_fufu, kazutake_hazano, sushispin, rella, konya_karasue, void_0, (wanke:0.4)",
-      "style": "anime style, vibrant colors, high contrast, crisp"
+      "style": "anime style, vibrant colors, high contrast, crisp",
+      "mode": "NewBie"
     },
     "极致对比油画手绘感": {
       "artist": "ciloranko, ask_(askzy), diyokama, quasarcake, remsrar, modare, liuyunnnn",
-      "style": "masterpiece, best quality, bright colors, oil painting, stunning aesthetic, ultra-detailed cross-hatching, extreme high contrast, dynamic line art"
+      "style": "masterpiece, best quality, bright colors, oil painting, stunning aesthetic, ultra-detailed cross-hatching, extreme high contrast, dynamic line art",
+      "mode": "NewBie"
     },
     "高对比锐线动漫": {
       "artist": "pottsness, midori_fufu, kazutake_hazano, sushispin, rella, konya_karasue, void_0, (wanke:0.4), (blackbeat:0.4), (JUEJUE:0.5), (Ebor18:1.2)",
-      "style": "anime style, vibrant colors, high contrast, crisp"
+      "style": "anime style, vibrant colors, high contrast, crisp",
+      "mode": "NewBie"
     },
     "高反差厚涂感锐化插画风格": {
       "artist": "pottsness, midori_fufu, kazutake_hazano, sushispin, rella, konya_karasue, void_0, azuuru, torino, aqua, siki_(chyoel), rin_yuu, quan_(kurisu_tina), chenbin, (atdan:1.3), ke-ta, (omone_hokoma_agm), gomzi, maccha(mochancc), rurudo, hiten(hitenkei), wanke, tidsean, (mitsu_(mitsu_art), kase_daiki), (abpart), ((deyui)), sheya",
-      "style": "anime style, vibrant colors, high contrast, crisp"
+      "style": "anime style, vibrant colors, high contrast, crisp",
+      "mode": "NewBie"
     },
     "绝区零式写实阴影": {
       "artist": "mitsu_(mitsu_art), jyt, omone_hokoma_agm, (deyui), kase_daiki, abpart, zenless_zone_zero",
-      "style": "anime_style, realistic_shading, white_light, sidelight, light_and_shadow, chiaroscuro, intense_shadow, lens_flare"
+      "style": "anime_style, realistic_shading, white_light, sidelight, light_and_shadow, chiaroscuro, intense_shadow, lens_flare",
+      "mode": "NewBie"
     },
     "缥缈杰作光影集": {
       "artist": "pottsness, midori_fufu, kazutake_hazano, sushispin, rella, konya_karasue, void_0, (wanke:0.4), (blackbeat:0.4), (JUEJUE:0.5), (Ebor18:1.2)",
-      "style": "**ultimate masterpiece digital painting**, **ethereal lighting**, **dreamy aesthetic**, **delicate floral details**, **high saturation blue sky**, **expressionist brushwork and high textural detail**, **maximalist detail**, **painterly texture**, oil painting, stunning aesthetic, ultra-detailed cross-hatching, extreme high contrast, dynamic line art"
+      "style": "**ultimate masterpiece digital painting**, **ethereal lighting**, **dreamy aesthetic**, **delicate floral details**, **high saturation blue sky**, **expressionist brushwork and high textural detail**, **maximalist detail**, **painterly texture**, oil painting, stunning aesthetic, ultra-detailed cross-hatching, extreme high contrast, dynamic line art",
+      "mode": "NewBie"
     },
     "油画叠色高亮表现主义": {
       "artist": "ciloranko, ask_(askzy), diyokama, quasarcake, remsrar, modare, liuyunnnn",
-      "style": "**ultimate masterpiece digital painting**, **ethereal lighting**, **dreamy aesthetic**, **delicate floral details**, **high saturation blue sky**, **expressionist brushwork and high textural detail**, **maximalist detail**, **painterly texture**, oil painting, stunning aesthetic, ultra-detailed cross-hatching, extreme high contrast, dynamic line art"
+      "style": "**ultimate masterpiece digital painting**, **ethereal lighting**, **dreamy aesthetic**, **delicate floral details**, **high saturation blue sky**, **expressionist brushwork and high textural detail**, **maximalist detail**, **painterly texture**, oil painting, stunning aesthetic, ultra-detailed cross-hatching, extreme high contrast, dynamic line art",
+      "mode": "NewBie"
     },
     "碧蓝幻想油画风格": {
       "artist": "(minabahideo:1.2), (onineko:1.1), (umeharasei:1.1), granbluefantasy, granbluefantasyofficialart, albumcover, cover, 2023year, 2024year, 2025year",
-      "style": "illustration, fantasy art, digital painting, ultra-detailed, masterpiece, finely detailed light and shadow, realistic anime style, dark romanticism, gothic surrealism"
+      "style": "illustration, fantasy art, digital painting, ultra-detailed, masterpiece, finely detailed light and shadow, realistic anime style, dark romanticism, gothic surrealism",
+      "mode": "NewBie"
     },
     "2渲3写实背景华丽动漫风(LoRA:nk_naylia0.5,konya_karasue0.5)": {
       "artist": "betabeet ,yoneyama_mai ,konya_karasue,fym",
-      "style": "anime_style,nk_naylia,konya_karasue ,highly detailed texture,physically based rendering (PBR),rim light anime style,digital art,illustration,cinematic,photorealistic,aesthetic,emotional,movie poster style HDR,2d rendering 3d effect,3d cg background,dreamlike aesthetic,shadows,high contrast,cinematic lighting,ray tracing,soft bloom,realistic lighting,global illumination,volumetric light,high-key lighting,backlighting"
+      "style": "anime_style,nk_naylia,konya_karasue ,highly detailed texture,physically based rendering (PBR),rim light anime style,digital art,illustration,cinematic,photorealistic,aesthetic,emotional,movie poster style HDR,2d rendering 3d effect,3d cg background,dreamlike aesthetic,shadows,high contrast,cinematic lighting,ray tracing,soft bloom,realistic lighting,global illumination,volumetric light,high-key lighting,backlighting",
+      "mode": "NewBie"
     },
     "简约线条高饱和高对比风": {
       "artist": "kataokasan,mika_pikazo,Midori_fufu,void_0,",
-      "style": "art_nouveau,flat_color,pop_art,anime_style,film_grain ,metal_badge_style,flat_lighting,sharp_shadows,vector_art, cel_shading, high_contrast, emblem_style, sticker, 2d, hard_edge, illustration,high_saturation"
+      "style": "art_nouveau,flat_color,pop_art,anime_style,film_grain ,metal_badge_style,flat_lighting,sharp_shadows,vector_art, cel_shading, high_contrast, emblem_style, sticker, 2d, hard_edge, illustration,high_saturation",
+      "mode": "NewBie"
     },
     "2D经典动画风格": {
       "artist": "daito,mika_pikazo,ogipote,sy4,funitarefu,kataokasan,rune_\\(dualhart\\),",
-      "style": "anime_style, realistic_shading"
+      "style": "anime_style, realistic_shading",
+      "mode": "NewBie"
     },
     "碧蓝档案风格高分写实阴影(LoRA:konya_karasue0.2,nk_naylia0.8)": {
       "artist": "[[[artist:betabeet]]], [[artist:yoneyama_mai]], fym, Blue Archive official art style",
-      "style": "ke1em1m1, konya_karasue, nk3, nk_naylia, anime_style, highly detailed texture, physically based rendering (PBR), rim light anime style, digital art, illustration, cinematic, photorealistic, aesthetic, emotional, movie poster style HDR, anime style, high resolution"
+      "style": "ke1em1m1, konya_karasue, nk3, nk_naylia, anime_style, highly detailed texture, physically based rendering (PBR), rim light anime style, digital art, illustration, cinematic, photorealistic, aesthetic, emotional, movie poster style HDR, anime style, high resolution",
+      "mode": "NewBie"
     },
     "战斗少女清淡色彩写实阴影(LoRA:夢ノ内,su_shi)": {
       "artist": "daito,ln,kataokasan, su_shi,",
-      "style": "daito,anime_style,xcnlight"
+      "style": "daito,anime_style,xcnlight",
+      "mode": "NewBie"
     },
     "厚涂边缘光碧蓝幻想风(LoRA:su_shi,ln,xcnlight)": {
       "artist": "su_shi, ln, daito, (minaba hideo:1.2), (onineko:1.1), (umehara sei:1.1), granblue fantasy, granblue fantasy official art",
-      "style": "anime_style, xcnlight, illustration, ultra-detailed, granblue fantasy, granblue fantasy official art style, dramatic lighting, rim light"
+      "style": "anime_style, xcnlight, illustration, ultra-detailed, granblue fantasy, granblue fantasy official art style, dramatic lighting, rim light",
+      "mode": "NewBie"
     },
     "硬朗描边高对比平涂风": {
       "artist": "134, daito, coldcat., ln",
-      "style": "flat color, limited palette, bold lines, thick outline, high contrast, retro artstyle, vector trace, pop art, decorative background, high_saturation"
+      "style": "flat color, limited palette, bold lines, thick outline, high contrast, retro artstyle, vector trace, pop art, decorative background, high_saturation",
+      "mode": "NewBie"
     },
     "极端对比霓虹合成波": {
       "artist": "ciloranko, diyokama, quasarcake, modare, remsrar, lifeline (a384079959), chuzenji, (horn/wood:0.6), 134",
-      "style": "highly stylized, graphic novel style, extreme color contrast, cyberpunk aesthetic, masterpiece, heavy color grading, **maximalist detail**, **painterly texture**, **high-impact drama**, stunning aesthetic, **ultimate masterpiece cinematic illustration**, **monochromatic dystopian realism**, **cold color grading**, **hyper-detailed environment**, xcnlight"
+      "style": "highly stylized, graphic novel style, extreme color contrast, cyberpunk aesthetic, masterpiece, heavy color grading, **maximalist detail**, **painterly texture**, **high-impact drama**, stunning aesthetic, **ultimate masterpiece cinematic illustration**, **monochromatic dystopian realism**, **cold color grading**, **hyper-detailed environment**, xcnlight",
+      "mode": "NewBie"
     },
     "2D动画截图风格(ln,su_shi,ziyongnb)": {
       "artist": "coldcat., ln, su_shi, rella, ciloranko, oekakitaro, novelance, min_(120716), tokkyu, miv4t, konya_karasue, [[z3zz4]], takeuchi_Takashi",
-      "style": "illustration, animation screenshot, flat art, high resolution, anime_style, ziyongnb, realistic_shading"
+      "style": "illustration, animation screenshot, flat art, high resolution, anime_style, ziyongnb, realistic_shading",
+      "mode": "NewBie"
     },
     "柔光写实赛璐珞风(su_shi)": {
       "artist": "{mafuyu (chibi21)}, {{rurudo, gusha s, hiro (dismaless), wlop, yoneyama mai, mikami mika}}, [[murata range]], su_shi",
-      "style": "anime_style, illustration, animation_screenshot, flat_art, high resolution"
+      "style": "anime_style, illustration, animation_screenshot, flat_art, high resolution",
+      "mode": "NewBie"
     },
     "清透质感可爱插画风": {
       "artist": "[artist:ashima_takumi], [[artist:ciloranko]], [[artist:wlop]], [[artist:porforever]], {artist:cierra_(ra-bit)}, year 2023",
-      "style": "anime_style, light novel illustration, soft cel shading, cinematic lighting, vibrant colors, painterly background, high detail, sharp focus, digital art."
+      "style": "anime_style, light novel illustration, soft cel shading, cinematic lighting, vibrant colors, painterly background, high detail, sharp focus, digital art.",
+      "mode": "NewBie"
     },
     "柔光唯美晨昏光效": {
       "artist": "[artist:ningenmame], artist:ciloranko, [[[wlop]]], [[artist:rhasta]], [artist:As109]",
-      "style": "anime_style, digital illustration, soft cinematic lighting, golden hour, detailed cel shading, painterly background, vibrant colors, high resolution, clean line art."
+      "style": "anime_style, digital illustration, soft cinematic lighting, golden hour, detailed cel shading, painterly background, vibrant colors, high resolution, clean line art.",
+      "mode": "NewBie"
     },
     "厚涂电影感半写实赛璐珞(xcnlight,konya_karasue)": {
       "artist": "artist:Cogecha, [artist:ningen_mame], {artist:wlop}, [artist:sho_(sho_lwlw)]",
-      "style": "Anime style, cinematic lighting, oil painting texture, thick brushstrokes, moody atmosphere, desaturated colors, soft focus background, Makoto Shinkai inspired lighting, semi-realistic cel shading, xcnlight, konya_karasue"
+      "style": "Anime style, cinematic lighting, oil painting texture, thick brushstrokes, moody atmosphere, desaturated colors, soft focus background, Makoto Shinkai inspired lighting, semi-realistic cel shading, xcnlight, konya_karasue",
+      "mode": "NewBie"
     },
     "清透逆光剧场柔和夏日": {
       "artist": "[artist:ningen_mame], [artist:ATDAN], artist:ciloranko, [[artist:rhasta]], artist:tidsean, [, [artist:ke-ta], {{chiaroscuro}}, [artist:sho_(sho_lwlw)]]",
-      "style": "anime_style, Cel Shading, Makoto Shinkai Style, Vibrant Colors, High Contrast, Soft Cinematic Lighting, Summer Aesthetic, Detailed Sky, Clean Lines, Masterpiece."
+      "style": "anime_style, Cel Shading, Makoto Shinkai Style, Vibrant Colors, High Contrast, Soft Cinematic Lighting, Summer Aesthetic, Detailed Sky, Clean Lines, Masterpiece.",
+      "mode": "NewBie"
     },
     "柔光梦幻粉彩厚涂二次元风": {
       "artist": "[[[artist:ningen mame]]], artist:miyase mahiro, artist:chen bin, [[[artist:sho (sho lwlw)]]], [[[[artist:ogipote]]]], [[[artist:ciloranko]]], [artist:cogecha], [artist:wlop], year 2023",
-      "style": "anime_style, ethereal digital painting, soft cel-shading, vibrant pastel tones, dreamy lighting, painterly texture, high-key lighting, Makoto Shinkai inspired, atmospheric perspective, delicate line art, xcnlight"
+      "style": "anime_style, ethereal digital painting, soft cel-shading, vibrant pastel tones, dreamy lighting, painterly texture, high-key lighting, Makoto Shinkai inspired, atmospheric perspective, delicate line art, xcnlight",
+      "mode": "NewBie"
     },
     "高调强逆光平涂冷淡插画风": {
       "artist": "ln, daito, coldcat., kazutake hazano, (ciloranko:0.907), (kedama milk:0.907), (ask \\(askzy\\):0.907), wanke, wlop, fujiyama.",
-      "style": "anime_style, high-definition 2D digital illustration, cel shading with soft gradients, vibrant blue and white palette, airy and bright atmosphere, cinematic lighting, lens flare, sun-drenched, high key lighting, crisp line art, detailed textures on fabric, ethereal hair strands, Makoto Shinkai inspired sky, expansive background, clean aesthetics, masterpiece, 8k resolution, xcnlight"
+      "style": "anime_style, high-definition 2D digital illustration, cel shading with soft gradients, vibrant blue and white palette, airy and bright atmosphere, cinematic lighting, lens flare, sun-drenched, high key lighting, crisp line art, detailed textures on fabric, ethereal hair strands, Makoto Shinkai inspired sky, expansive background, clean aesthetics, masterpiece, 8k resolution, xcnlight",
+      "mode": "NewBie"
     },
     "高亮平涂矢量轻漫风格": {
       "artist": "(ningen mame:0.907), ciloranko, (sho \\(sho lwlw\\):0.907), (tianliang duohe fangdongye:0.7835), (rhasta:0.7835), ln",
-      "style": "anime_style, vibrant digital illustration, cel shading with soft gradients, high-key lighting, azure and golden yellow color palette, clean line art, luminous atmosphere, dynamic composition, floating particulate effects, light novel cover aesthetic, flat depth of field, crisp details, 2D rendering."
+      "style": "anime_style, vibrant digital illustration, cel shading with soft gradients, high-key lighting, azure and golden yellow color palette, clean line art, luminous atmosphere, dynamic composition, floating particulate effects, light novel cover aesthetic, flat depth of field, crisp details, 2D rendering.",
+      "mode": "NewBie"
     },
     "高饱和低反差平涂插画风格": {
       "artist": "[artist:ningen_mame], artist:ciloranko, [artist:sho_(sho_lwlw)], [[tianliang duohe fangdongye]], [[artist:rhasta]], ln",
-      "style": "anime_style, Cel shaded, Vibrant palette, High-key lighting, Airy atmosphere, Soft focus background, Out of bounds composition, Painterly strokes, Clear line art, Ghibli-esque color aesthetic, Overexposed effect, Whimsical mood, Digital 2D illustration."
+      "style": "anime_style, Cel shaded, Vibrant palette, High-key lighting, Airy atmosphere, Soft focus background, Out of bounds composition, Painterly strokes, Clear line art, Ghibli-esque color aesthetic, Overexposed effect, Whimsical mood, Digital 2D illustration.",
+      "mode": "NewBie"
     },
     "复古叠彩低保真赛璐璐": {
       "artist": "[[artist:nanmokaken,artist:butterchalk]],{{artist:yoneyama_mai,artist:miyo_(ranthath),artist:yoshinari_you,artist:potg(piotegu)}},",
-      "style": "anime_style, cel shaded, clean lineart, soft pastel color palette, warm sunlight, low-fidelity aesthetic, whimsical atmosphere, retro 90s anime influence, simple shapes, vibrant saturation, high-key lighting."
+      "style": "anime_style, cel shaded, clean lineart, soft pastel color palette, warm sunlight, low-fidelity aesthetic, whimsical atmosphere, retro 90s anime influence, simple shapes, vibrant saturation, high-key lighting.",
+      "mode": "NewBie"
     },
     "清新平涂夏日日漫风": {
       "artist": "kazutake hazano, (ciloranko:0.907), (kedama milk:0.907), (ask \\(askzy\\):0.907), wanke, wlop, fujiyama",
-      "style": "anime_style, high-definition 2D digital illustration, cel shading with soft gradients, vibrant blue and white palette, airy and bright atmosphere, cinematic lighting, lens flare, sun-drenched, high key lighting, crisp line art, detailed textures on fabric, ethereal hair strands, Makoto Shinkai inspired sky, expansive background, clean aesthetics, masterpiece, 8k resolution."
+      "style": "anime_style, high-definition 2D digital illustration, cel shading with soft gradients, vibrant blue and white palette, airy and bright atmosphere, cinematic lighting, lens flare, sun-drenched, high key lighting, crisp line art, detailed textures on fabric, ethereal hair strands, Makoto Shinkai inspired sky, expansive background, clean aesthetics, masterpiece, 8k resolution.",
+      "mode": "NewBie"
     },
     "高精硬边写实光影漫绘": {
       "artist": "[chen_bin], [sho_(sho_lwlw)], [ningen_mame], [tianliang_duohe_fangdongye], [[ciloranko]], [[rella]], [[konya_karasue]]",
-      "style": "anime_style,realistic_shading"
+      "style": "anime_style,realistic_shading",
+      "mode": "NewBie"
     },
     "锐利光影写实材质风": {
       "artist": "rella, ciloranko, oekakitaro, novelance, min_(120716), tokkyu, miv4t, konya_karasue, [[z3zz4]], takeuchi_Takashi",
-      "style": "anime_style,realistic_shading"
+      "style": "anime_style,realistic_shading",
+      "mode": "NewBie"
     },
     "细线粉彩柔光日系CG": {
       "artist": "[artist:chen bin], [artist:sho (sho lwlw)], [artist:ningen mame], [artist:tianliang duohe fangdongye], [[artist:ciloranko]], [[artist:rella]]. [[artist:konya karasue]]",
-      "style": "anime_style illustration, 2D digital art, visual novel CG, masterpiece, best quality, ultra-detailed, 8k resolution, bright and airy atmosphere, pastel color palette, vibrant tones, soft natural lighting, dappled sunlight, lens flare, beautiful lighting, rim lighting, soft shading, delicate lineart, depth of field (DoF), elaborate background lighting, ziyongnb"
+      "style": "anime_style illustration, 2D digital art, visual novel CG, masterpiece, best quality, ultra-detailed, 8k resolution, bright and airy atmosphere, pastel color palette, vibrant tones, soft natural lighting, dappled sunlight, lens flare, beautiful lighting, rim lighting, soft shading, delicate lineart, depth of field (DoF), elaborate background lighting, ziyongnb",
+      "mode": "NewBie"
     },
     "琥珀金调逆光颗粒质感CG": {
       "artist": "{artist:miv4t}, {{artist:konya karasue}}, artist:rella, [[[artist:quasarcake]]], artist:fajyobore, [[[[[artist:skyrick9413]]]]]",
-      "style": "anime_style, digital illustration, warm golden lighting, rim lighting, dappled sunlight, komorebi, soft bokeh background, autumnal color palette, amber and gold tones, dreamlike atmosphere, cinematic lighting, high contrast highlights, delicate line art, ethereal glow, floating particles."
+      "style": "anime_style, digital illustration, warm golden lighting, rim lighting, dappled sunlight, komorebi, soft bokeh background, autumnal color palette, amber and gold tones, dreamlike atmosphere, cinematic lighting, high contrast highlights, delicate line art, ethereal glow, floating particles.",
+      "mode": "NewBie"
     },
     "粗砺墨线限色高反差平涂风": {
       "artist": "{{limited palette}}, {animation paper, color trace}, {colored}, fujiyama, nardack, tekito_midori, shuri_(84k), mion, {{{artist:yoneyama_mai}}}, [[artist:rella]], ink wash painting, {lineart}, [monochrome], [[colorful]], stunning composition",
-      "style": "anime_style, Sketchy, high contrast, vibrant pop art, limited color palette, bold rough lineart, flat colors, minimalist shading, offset color outline, hand-drawn aesthetic, expressive linework, cel-shaded, ink sketch."
+      "style": "anime_style, Sketchy, high contrast, vibrant pop art, limited color palette, bold rough lineart, flat colors, minimalist shading, offset color outline, hand-drawn aesthetic, expressive linework, cel-shaded, ink sketch.",
+      "mode": "NewBie"
     },
     "晶透虹彩棱镜流体画风": {
       "artist": "{{{artist:yoneyama_mai}}},artist:mika_pikazo,artist:glutton_（18152740927lx）,{{artist:rolua}}",
-      "style": "anime_style, clean lineart, highly detailed eyes, flowing liquid elements, translucent water effects, cool blue and white color palette, iridescent tones, soft luminous glow, ethereal aesthetic, glossy fluid dynamics, light refraction effects, cel-shading, dreamy atmospheric rendering, Japanese digital art style, 2D illustration, delicate fine linework, crystalline transparency, high saturation blue hues, pastel highlights, studio quality anime art"
+      "style": "anime_style, clean lineart, highly detailed eyes, flowing liquid elements, translucent water effects, cool blue and white color palette, iridescent tones, soft luminous glow, ethereal aesthetic, glossy fluid dynamics, light refraction effects, cel-shading, dreamy atmospheric rendering, Japanese digital art style, 2D illustration, delicate fine linework, crystalline transparency, high saturation blue hues, pastel highlights, studio quality anime art",
+      "mode": "NewBie"
     },
     "极细墨线透亮空气感画风": {
       "artist": "artist:adpx, artist:nikorashi-ka, artist:rune \\(dualhart\\)",
-      "style": "clean lineart, flat cel shading, soft pastel color palette, light and airy aesthetic, high saturation accent colors, minimal background, pure white background, delicate ink outlines, lightweight sketch feel, Japanese anime art style, character illustration, lace and ruffle texture details, glossy hair rendering, bright warm skin tones, hand-drawn aesthetic, light novel illustration style, blue and white color accent scheme, loose watercolor-like fill, fine detail linework"
+      "style": "clean lineart, flat cel shading, soft pastel color palette, light and airy aesthetic, high saturation accent colors, minimal background, pure white background, delicate ink outlines, lightweight sketch feel, Japanese anime art style, character illustration, lace and ruffle texture details, glossy hair rendering, bright warm skin tones, hand-drawn aesthetic, light novel illustration style, blue and white color accent scheme, loose watercolor-like fill, fine detail linework",
+      "mode": "NewBie"
     },
     "动漫逆光电影感高对比渲染": {
       "artist": "artist:hibioes, artist:jima, artist:toosaka asagi, artist:miv4t, artist:huashijw, artist:quasarcake, artist:konya_karasue, artist:rella",
-      "style": "anime_style, backlight, soft light, high contrast, colorful, detailed light, sunlight, shine on girl's body, cinematic lighting, close-up, dutch angle, blurry, light and dark contrast, light rays, intense shadow"
+      "style": "anime_style, backlight, soft light, high contrast, colorful, detailed light, sunlight, shine on girl's body, cinematic lighting, close-up, dutch angle, blurry, light and dark contrast, light rays, intense shadow",
+      "mode": "NewBie"
     },
     "印象派笔触冷调厚涂风": {
       "artist": "daito, artist:wlop, artist:binggong_asylum, {artist:chen bin}, artist:dino_(dinoartforame), artist:mignon, artist:Kidmo, {artist:wanke}, artist:mika_pikazo, dsmile, year 2024, {{{loli}}}",
-      "style": "anime_style, digital painting, impressionistic brushstrokes, soft diffused lighting, muted cool tones, intricate details, dynamic lines, loose background texture, cinematic composition, masterpiece quality"
+      "style": "anime_style, digital painting, impressionistic brushstrokes, soft diffused lighting, muted cool tones, intricate details, dynamic lines, loose background texture, cinematic composition, masterpiece quality",
+      "mode": "NewBie"
     },
     "冷调斑驳光影半厚涂风格": {
       "artist": "mika_pikazo, (ogipote:1.2), sy4, funitarefu, (kataokasan:1.2), rune_(dualhart), rella, maccha_(mochancc), tidsean, wlop, ciloranko, atdan, year_2024",
-      "style": "anime_style, anime illustration, digital painting, lofi aesthetic, soft cel shading, cool color palette, soft dappled lighting, glass reflection effect, shallow depth of field"
+      "style": "anime_style, anime illustration, digital painting, lofi aesthetic, soft cel shading, cool color palette, soft dappled lighting, glass reflection effect, shallow depth of field",
+      "mode": "NewBie"
     },
     "高反差色散丁达尔渲染": {
       "artist": "artist:toosaka_asagi, artist:miv4t, artist:huashijw, artist:quasarcake, artist:hibioes, artist:konya karasue, artist:rella",
-      "style": "anime_style, anime illustration, cel shading, vibrant colors, iridescent reflections, high contrast lighting, dappled shadows, chromatic aberration, crisp lineart, close-up, dutch angle, blurry, light and dark contrast, light rays, intense shadow, konya_karasue"
+      "style": "anime_style, anime illustration, cel shading, vibrant colors, iridescent reflections, high contrast lighting, dappled shadows, chromatic aberration, crisp lineart, close-up, dutch angle, blurry, light and dark contrast, light rays, intense shadow, konya_karasue",
+      "mode": "NewBie"
     },
     "锐利线条高反差硬边赛璐璐(ziyongnb)": {
       "artist": "(artist:mika pikazo)[artist:ciloranko], artist:kazutake hazano, [artist:kedama milk][artist:ask_(askzy)], artist:wanke, artist:wlop, artist:fujiyama, year 2023",
-      "style": "anime_style, cel shading, high contrast, vibrant colors, clean lineart, minimalist background, flat coloring, crisp digital painting, ziyongnb, h4z4n0"
+      "style": "anime_style, cel shading, high contrast, vibrant colors, clean lineart, minimalist background, flat coloring, crisp digital painting, ziyongnb, h4z4n0",
+      "mode": "NewBie"
     },
     "青色霓虹边缘光写实厚涂(konya_karusue,nk-nyalia)": {
       "artist": "nyalia, (artist:reoen:0.5), (wanke:0.4), artist:ciloranko, artist:john kafka, artist:wanke, artist:betabeet, artist:quasarcake, (artist:alphonse \\(white datura\\):0.3), (artist:fkey:0.1), (artist:konya karasue:0.2), (artist:dino \\(dinoartforame\\):0.8), (wlop:0.7)",
-      "style": "anime_style, cinematic lighting, neon glow, bokeh, rim lighting, high contrast, smooth digital painting, cyan and magenta color palette, konya_karasue, nk-nyalia"
+      "style": "anime_style, cinematic lighting, neon glow, bokeh, rim lighting, high contrast, smooth digital painting, cyan and magenta color palette, konya_karasue, nk-nyalia",
+      "mode": "NewBie"
     },
     "粉笔颗粒冷调氤氲半写实": {
       "artist": "rella, maccha_(mochancc), tidsean, wlop, ciloranko, atdan, year_2024",
-      "style": "anime_style, anime aesthetic, digital illustration, monochromatic blue palette, pastel colors, soft glowing lighting, flat shading, grainy texture, chalk brushstrokes, ethereal mood"
+      "style": "anime_style, anime aesthetic, digital illustration, monochromatic blue palette, pastel colors, soft glowing lighting, flat shading, grainy texture, chalk brushstrokes, ethereal mood",
+      "mode": "NewBie"
     },
     "清透高调细线平涂淡彩": {
       "artist": "{mafuyu (chibi21)}, {{rurudo, gusha s, hiro (dismaless), wlop, yoneyama mai, mikami mika}}, [[murata range]]",
-      "style": "anime_style, Cel shading, Clean lineart, Soft pastel color palette, High-key lighting, Minimalist white background, Moe aesthetic, Flat color with subtle gradients, Vibrant but desaturated, Digital 2D illustration."
+      "style": "anime_style, Cel shading, Clean lineart, Soft pastel color palette, High-key lighting, Minimalist white background, Moe aesthetic, Flat color with subtle gradients, Vibrant but desaturated, Digital 2D illustration.",
+      "mode": "NewBie"
     },
     "漫反射软光影轻厚涂风格(xcnlight,ziyongnb)": {
       "artist": "artist:miyuki_(miyuki0529), artist:potg, rei_(sanbonzakura), artist:cierra_(ra-bit), artist:ask_(askzy), artist:gomzi, artist:you_shimizu, [artist:ningen_mame], artist:ciloranko, year 2022",
-      "style": "anime_style, xcnlight, ziyongnb"
+      "style": "anime_style, xcnlight, ziyongnb",
+      "mode": "NewBie"
     },
     "写实厚涂逆光感蓝色现代日系": {
       "artist": "artist:ciloranko, artist:tianliang duohe fangdongye, [[artist:modare]], [artist:sho_(sho_lwlw)]",
-      "style": "anime_style, Modern anime art style, High-key lighting, Vibrant saturated palette, Makoto Shinkai aesthetic, Low-angle perspective, Clean cel-shading, Airy and nostalgic atmosphere, Painterly rendering, Crisp outlines, Cinematic backlighting."
+      "style": "anime_style, Modern anime art style, High-key lighting, Vibrant saturated palette, Makoto Shinkai aesthetic, Low-angle perspective, Clean cel-shading, Airy and nostalgic atmosphere, Painterly rendering, Crisp outlines, Cinematic backlighting.",
+      "mode": "NewBie"
     }
   }
 }

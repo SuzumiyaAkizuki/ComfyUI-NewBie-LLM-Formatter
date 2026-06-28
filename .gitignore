@@ -5,3 +5,8 @@ test.py
 .prompt_cache.json
 docs/
 *CLAUDE*
+*/__pycache__/
+site/
+AGENTS.md
+tests/
+

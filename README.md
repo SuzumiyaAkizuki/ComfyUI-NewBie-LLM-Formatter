@@ -52,7 +52,7 @@
 - **智能提示词转化**：支持将简单的自然语言、Danbooru 标签串，完美转化为目标模型所需的提示词格式。
 - **多模态视觉反推**：支持传入图片，利用多模态大模型直接反推生成高精度提示词。
 - **高鲁棒性与自动修复**：内置 XML 语法解析与自动修复机制，外加 API 网络异常/格式异常自动重试逻辑（最高 3 次），确保工作流不中断。
-- **画风预设与管理**：内置数十种高质量艺术家/画风预设，支持一键注入，并提供在 UI 中直接保存新画风的节点。
+- **画风预设与管理**：内置数十种高质量艺术家/画风预设，支持按 NewBie / Anima 区分、一键注入，并可从风格注入节点直接保存当前组合。
 - **深度思考与破限支持**：适配主流 API 的"深度思考"模式（Deepseek、OpenRouter、Gemini、Anthropic、Kimi、MIMO、Vercel 等），内置 NSFW 提示词破限框架。
 
 - 项目 GitHub 地址：https://github.com/SuzumiyaAkizuki/ComfyUI-NewBie-LLM-Formatter
@@ -143,7 +143,7 @@ comfy node install NewBie-LLM-Formatter
 | `fewshot_user_anima` | `string` | **Anima模式**Few-shot 注入功能。示例用户输入应包含标签 + 自然语言描述。与 `fewshot_assistant_anima` 同时填写时生效。 |
 | `fewshot_assistant_anima` | `string` | **Anima模式**Few-shot 注入功能。示例 AI 回复应为 `## Prompt`（标签块 + 英文 NL）+ `## 中文解释` 格式。 |
 | `artists_anima` | `string` | **Anima模式**参考画师列表，指导LLM选择合适的画师。可以在[这个视频](https://www.bilibili.com/video/BV1Q1w1zKEwk)或者[这个链接](https://drive.google.com/file/d/1CtcODfWbDl8KThORS0GHZfcWKCCMUUmD/view)中下载对应的内容。为保护作者的知识产权，这里不提供对应的文本。 |
-| `styles` | `object` | 预设风格提示词集合，供 XML Style Injector 节点使用。可通过 Style Preset Saver 节点或直接编辑此文件来添加风格。 |
+| `styles` | `object` | 预设风格提示词集合，供 XML Style Injector 节点使用。每个预设可标记适用模式（NewBie / Anima / Both），也可通过 Style Preset Saver 节点或直接编辑此文件来添加。 |
 
 ### Anima 模式提示词格式
 
@@ -205,7 +205,8 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | `model_name` | STRING/下拉框 | 模型名称。若配置文件中的 `model_list` 有效，显示为下拉框；否则显示为文本输入框。 |
 | `mode` | 下拉框 | **NewBie**（默认）或 **Anima**。决定使用哪套 system prompt 以及输出解析方式。 |
 | `thinking` | BOOLEAN | 深度思考模式开关。`true` 时模型进行深度思考，思考过程输出到控制台。**推荐设置为 `false`。** Agent 模式下此开关被强制关闭。 |
-| `agent_effort` | 下拉框 | **[v1.9.9 新增]** Agent 努力等级。`Close`（默认）= 关闭 Agent，走普通模式；`Low` = 流水线模式（单轮批量搜索 + LLM 组装，不走 Agent 循环，最快）；`Medium` = Agent 循环模式（`full_scene` 预设，平衡召回质量与收敛速度，最多 8 轮）；`High` = Agent 循环模式（`concept_explore` 宽召回预设 + 默认携带 wiki 释义，最多 10 轮，最深入）。 |
+| `agent_effort` | 下拉框 | **[v1.2.9 新增]** Agent 努力等级。`Close`（默认）= 关闭 Agent，走普通模式；`Low` = 流水线模式（单轮批量搜索 + LLM 组装，不走 Agent 循环，最快）；`Medium` = Agent 循环模式（`full_scene` 预设，平衡召回质量与收敛速度，最多 8 轮）；`High` = Agent 循环模式（`concept_explore` 宽召回预设 + 默认携带 wiki 释义，最多 10 轮，最深入）。 |
+| `force_full_agent_run` | BOOLEAN | 强制本次 Agent 从头生成，不复用上一轮结果。通常保持关闭；当你觉得上一轮缓存影响了本次修改时，再临时打开。 |
 | `user_text` | STRING | 待转换的自然语言描述或标签集。 |
 
 **输出参数：**
@@ -224,6 +225,13 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | 输出解析 | 提取 XML 代码块，校验并修复格式 | 提取 `## Prompt` 和 `## 中文解释` 两个 Markdown 标题段 |
 | XML 自动修复 | 启用 | 不启用 |
 | Agent 模式 | 多轮工具搜索 → XML 输出 | 多轮工具搜索 → `## Prompt` + `## 中文解释` 输出 |
+
+**增量修订与复用：**
+
+- **相同输入直接复用**：同一节点内，如果本次输入与上次完全一致，会直接返回上次结果，不再次调用 LLM。
+- **仅标点/空白变化不重跑**：只调整逗号、空格、换行等不影响语义的内容时，也会直接复用。
+- **小幅修改走增量修订**：当新旧提示词整体仍足够相似时，Agent 会把上一轮提示词、上一轮输出和本轮完整提示词一起交给模型，让模型对比后做最小化修订。当前相似度门槛为 `0.55`。
+- **需要彻底重做时可手动强制**：打开 `force_full_agent_run` 后，本次运行会忽略上一轮结果，从头生成。
 
 **内置鲁棒性机制：**
 
@@ -346,7 +354,7 @@ An adorable girl with white hair and striking blue eyes poses confidently in her
 |------|------|------|
 | `xml_input` | STRING | 待处理的提示词文本。NewBie 模式下应为含 `<img>` 标签的 XML；Anima 模式下应为换行分隔的纯文本。 |
 | `mode` | 下拉框 | **NewBie** 或 **Anima**，需与 LLM Xml Prompt Formatter 节点的模式保持一致。 |
-| `preset` | 下拉框 | 选择预设风格提示词集合，内容来自 `LPF_config.json` 的 `styles` 字段。 |
+| `preset` | 下拉框 | 选择预设风格提示词集合，内容来自 `LPF_config.json` 的 `styles` 字段。新预设会显示 `[NewBie]`、`[Anima]` 或 `[Both]` 前缀；旧工作流中的原名称仍然可用。 |
 | `artist_add` | STRING（可选） | 额外的画师标签，将**拼接在预设画师列表之前**。 |
 | `style_add` | STRING（可选） | 额外的风格标签，将**拼接在预设风格列表之前**。 |
 
@@ -355,6 +363,15 @@ An adorable girl with white hair and striking blue eyes poses confidently in her
 | 参数 | 说明 |
 |------|------|
 | `xml_output` | 注入风格后的提示词。 |
+| `style_save_metadata` | 保存专用输出，包含本次实际使用的模式、原始画师列表和风格文本，可直接连接到 Style Preset Saver。 |
+
+`style_save_metadata` 不会改变图像提示词本身，只是方便把当前组合保存成新预设，格式类似：
+
+```xml
+<mode>NewBie</mode>
+<artist>...</artist>
+<style>...</style>
+```
 
 **NewBie 模式行为：**
 
@@ -384,19 +401,19 @@ Anima 模式下的画师和风格注入逻辑：
 示例：`[ciloranko], maccha_(mochancc), (tidsean:1.2), wlop 1.1, year_2024`
 → `@ciloranko, @maccha_mochancc, @tidsean, @wlop, @year_2024`
 
-配置文件内置约 40 个预设风格串，可在[此链接](https://docs.qq.com/sheet/DTUNCQW5TWFBMVGhY?tab=BB08J2)查看例图。
+配置文件内置数十个预设风格串，可在[此链接](https://docs.qq.com/sheet/DTUNCQW5TWFBMVGhY?tab=BB08J2)查看例图。
 
 ---
 
 ### 3. Style Preset Saver
 
-**功能：** 从当前提示词中自动提取 `<artist>` 和 `<style>` 标签，并将其保存为新的风格预设到 `LPF_config.json` 中，方便后续在 XML Style Injector 中调用。
+**功能：** 从当前提示词或风格注入节点的保存输出中提取画师、风格和适用模式，并将其保存为新的风格预设到 `LPF_config.json` 中，方便后续在 XML Style Injector 中调用。
 
 **输入参数：**
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `text_input` | STRING | 输入包含 `<artist>` 和/或 `<style>` 标签的提示词文本，节点将自动解析这两个字段的内容。 |
+| `text_input` | STRING | 输入包含 `<artist>`、`<style>`，以及可选 `<mode>` 的文本；可直接连接风格注入节点的 `style_save_metadata` 输出。 |
 | `preset_name` | STRING | 新预设的名称。若名称为空或与已有预设重名，节点将放弃保存。 |
 | `save_trigger` | BOOLEAN | 保存开关。仅当显示 `Save as Styles` 时才会执行保存操作；显示 `Do Not Save` 时仅提取不保存。 |
 
@@ -404,9 +421,9 @@ Anima 模式下的画师和风格注入逻辑：
 
 | 参数 | 说明 |
 |------|------|
-| `extracted_tags` | 从输入中提取到的风格标签预览，格式为 `<artist>...</artist>\n<style>...</style>`，无论是否保存均会输出。 |
+| `extracted_tags` | 从输入中提取到的风格标签预览。若输入包含模式信息，会显示为 `<mode>...</mode>\n<artist>...</artist>\n<style>...</style>`；无论是否保存均会输出。 |
 
-> **注意：** Style Preset Saver 目前仅支持从 XML 格式（NewBie 模式）的提示词中提取标签。预设保存格式与模式无关，保存后的预设可在 NewBie 和 Anima 两种模式下的 XML Style Injector 中使用。
+> **注意：** 旧版只包含 `<artist>` / `<style>` 的保存输入仍然可用；新版从风格注入节点保存时会同时带上模式信息，便于在预设列表中区分 NewBie、Anima 或通用风格。
 
 ---
 
@@ -433,6 +450,18 @@ Anima 模式下的画师和风格注入逻辑：
 
 <details open>
 <summary>展开/折叠更新历史</summary>
+
+### 2026年06月26日 v1.3.3
+
+> 让 Agent 的迭代修改更可控，风格预设的保存和选择更清晰，旧工作流继续可用。
+
+- **改提示词更稳**：在上一轮结果基础上继续修改时，Agent 会更认真地对比「修改前」和「修改后」的完整描述，减少只改一半、误改无关标签、或把新增要求放错位置的情况。
+- **复杂小改动也能续写**：对相似度很高但同时改了多个细节的提示词，插件会尽量继续复用上一轮结果，而不是轻易从头重跑；中文书名号、括号等内容也更不容易被截断。
+- **可一键强制重跑 Agent**：新增 `force_full_agent_run` 开关。需要彻底摆脱上一轮缓存影响时，可以临时打开它，让本次生成从头开始。
+- **减少空响应中断**：部分 API 网关返回内容位置不一致时，Agent 现在更容易正确读到结果，复杂改写也更少因为空响应而失败。
+- **风格预设更容易区分**：风格下拉项会显示 `[NewBie]`、`[Anima]` 或 `[Both]`，便于区分预设适用的模型类型；旧工作流里保存的原预设名称仍然兼容。
+- **风格保存更顺手**：风格注入节点现在会额外输出一份可直接连接到 Style Preset Saver 的保存信息，可以把当前实际使用的画师和风格组合快速存成新预设。
+- **预设模式会被保存**：Style Preset Saver 会记录预设属于 NewBie、Anima 还是通用类型，后续整理大量风格时更清楚。
 
 ### 2026年06月16日 v1.3.2
 

@@ -1,3 +1,4 @@
+import html
 import json
 import os
 import re
@@ -11,6 +12,21 @@ class BColors:
 
 CONFIG_FILENAME = "LPF_config.json"
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
+
+def normalize_style_mode(value):
+    mode = str(value or "Both").strip().lower()
+    if mode == "newbie":
+        return "NewBie"
+    if mode == "anima":
+        return "Anima"
+    return "Both"
+
+
+def extract_first_tag(text, pattern):
+    matches = re.findall(pattern, text, re.IGNORECASE | re.DOTALL)
+    if not matches:
+        return ""
+    return html.unescape(matches[0]).strip()
 
 
 class LLM_Style_Saver:
@@ -36,11 +52,16 @@ class LLM_Style_Saver:
 
     def save_preset_logic(self, text_input, preset_name, save_trigger):
         # 提取
+        mode_pattern = r"<mode>(.*?)</mode>"
         artist_pattern = r"<(?:artist|artists)>(.*?)</(?:artist|artists)>"
         style_pattern = r"<(?:style|styles)>(.*?)</(?:style|styles)>"
 
-        all_artists = re.findall(artist_pattern, text_input, re.IGNORECASE | re.DOTALL)
-        all_styles = re.findall(style_pattern, text_input, re.IGNORECASE | re.DOTALL)
+        raw_mode = extract_first_tag(text_input, mode_pattern)
+        final_mode = normalize_style_mode(raw_mode)
+        has_mode = bool(raw_mode)
+
+        all_artists = [html.unescape(v) for v in re.findall(artist_pattern, text_input, re.IGNORECASE | re.DOTALL)]
+        all_styles = [html.unescape(v) for v in re.findall(style_pattern, text_input, re.IGNORECASE | re.DOTALL)]
 
         # 清洗 Artist
         clean_artists = []
@@ -57,7 +78,10 @@ class LLM_Style_Saver:
         final_style_str = ", ".join(list(dict.fromkeys(clean_styles)))
 
         # 拼装输出字符串
-        extracted_output = f"<artist>{final_artist_str}</artist>\n<style>{final_style_str}</style>"
+        if has_mode:
+            extracted_output = f"<mode>{final_mode}</mode>\n<artist>{final_artist_str}</artist>\n<style>{final_style_str}</style>"
+        else:
+            extracted_output = f"<artist>{final_artist_str}</artist>\n<style>{final_style_str}</style>"
 
         normalized_name = preset_name.strip()
 
@@ -93,6 +117,7 @@ class LLM_Style_Saver:
 
             # 保存
             data["styles"][normalized_name] = {
+                "mode": final_mode,
                 "artist": final_artist_str,
                 "style": final_style_str
             }
@@ -109,4 +134,5 @@ class LLM_Style_Saver:
 
         # 4. 无论保存结果如何，都返回提取的内容
         return (extracted_output,)
+
 

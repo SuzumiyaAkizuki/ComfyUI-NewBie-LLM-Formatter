@@ -34,6 +34,60 @@ def load_styles_from_config():
             print(f"{BColors.FAIL}[XML_Style_Injector]: 加载配置文件出错: {e}{BColors.ENDC}")
     return styles
 
+def normalize_style_mode(value):
+    mode = str(value or "Both").strip().lower()
+    if mode == "newbie":
+        return "NewBie"
+    if mode == "anima":
+        return "Anima"
+    return "Both"
+
+
+def style_display_name(name, style_data):
+    mode = normalize_style_mode(style_data.get("mode") if isinstance(style_data, dict) else "Both")
+    return f"[{mode}] {name}"
+
+
+def strip_style_display_prefix(preset):
+    return re.sub(r'^\[(?:NewBie|Anima|Both)\]\s*', '', preset or '').strip()
+
+
+def resolve_style_preset(preset, styles):
+    key = strip_style_display_prefix(preset)
+    if key in styles:
+        return key
+    if preset in styles:
+        return preset
+    for name, data in styles.items():
+        if style_display_name(name, data) == preset:
+            return name
+    return key
+
+
+def _xml_text(value):
+    return (value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _format_artist_config_tag(content, weight):
+    if weight is not None and weight != 1.0:
+        return f"({content}:{weight})"
+    return content
+
+
+def format_artist_config_string(artist_tags):
+    if not artist_tags:
+        return ""
+    return ', '.join(_format_artist_config_tag(c, w) for c, w in artist_tags)
+
+
+def build_style_save_metadata(mode, artist_tags, style_text):
+    artist_text = format_artist_config_string(artist_tags)
+    return (
+        f"<mode>{normalize_style_mode(mode)}</mode>\n"
+        f"<artist>{_xml_text(artist_text)}</artist>\n"
+        f"<style>{_xml_text((style_text or '').strip())}</style>"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Tag parsing and formatting utilities
@@ -296,7 +350,11 @@ class LLM_Xml_Style_Injector:
     @classmethod
     def INPUT_TYPES(s):
         current_styles = load_styles_from_config()
-        style_keys = list(current_styles.keys())
+        style_keys = []
+        for name, data in current_styles.items():
+            style_keys.append(style_display_name(name, data))
+            if name not in style_keys:
+                style_keys.append(name)
 
         return {
             "required": {
@@ -318,14 +376,15 @@ class LLM_Xml_Style_Injector:
             }
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("xml_output",)
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("xml_output", "style_save_metadata")
     FUNCTION = "inject_style"
     CATEGORY = "NewBie LLM Formatter"
 
     def inject_style(self, xml_input, mode, preset, artist_add, style_add):
         current_styles = load_styles_from_config()
-        selected_data = current_styles.get(preset, {"artist": "", "style": ""})
+        preset_key = resolve_style_preset(preset, current_styles)
+        selected_data = current_styles.get(preset_key, {"artist": "", "style": ""})
 
         preset_artist = selected_data.get("artist", "").strip()
         preset_style = selected_data.get("style", "").strip()
@@ -349,10 +408,11 @@ class LLM_Xml_Style_Injector:
             return input_val if input_val else preset_val
 
         target_style = combine_tags(style_add, preset_style)
+        save_metadata = build_style_save_metadata(mode, target_artist_tags or [], target_style)
 
         if mode == "Anima":
             result = inject_anima_style(xml_input, target_artist_tags or [], target_style)
-            return (result,)
+            return (result, save_metadata)
 
         # NewBie mode: XML injection
         # Format artist tags for NewBie
@@ -365,7 +425,7 @@ class LLM_Xml_Style_Injector:
 
         if not match:
             print(f"{BColors.WARNING}[XML_Style_Injector]: 未发现 <img> 标签，跳过注入。{BColors.ENDC}")
-            return (xml_input,)
+            return (xml_input, save_metadata)
 
         header_text = xml_input[:match.start()].strip()
         xml_content = match.group(1)
@@ -398,8 +458,9 @@ class LLM_Xml_Style_Injector:
 
             modified_xml = etree.tostring(root, encoding='unicode', method='xml', pretty_print=True)
             final_output = f"{header_text}\n{modified_xml}" if header_text else modified_xml
-            return (final_output,)
+            return (final_output, save_metadata)
 
         except Exception as e:
             print(f"{BColors.FAIL}[XML_Style_Injector]: XML 解析失败: {e}{BColors.ENDC}")
-            return (xml_input,)
+            return (xml_input, save_metadata)
+
