@@ -3,6 +3,7 @@ import re
 import json
 from openai import OpenAI
 from prompt_agent.agent_core import PromptAgent
+from prompt_agent.agent_trace import emit_agent_trace
 from prompt_agent import utils
 import comfy.utils
 import comfy.model_management
@@ -317,6 +318,14 @@ class LLM_Prompt_Formatter:
             except comfy.model_management.InterruptProcessingException:
                 raise
             except Exception as e:
+                emit_agent_trace(
+                    unique_id,
+                    "fallback",
+                    status="error",
+                    title="Agent fallback",
+                    summary="Agent 失败，已回退普通模式",
+                    details={"error": str(e)},
+                )
                 print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: Agent 模式失败: {e}，回退为普通模式{BColors.ENDC}")
 
         # ── 普通模式 ─────────────────────────────────────────────────

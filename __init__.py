@@ -10,6 +10,8 @@ from .LLM_Node import LLM_Prompt_Formatter
 from .LLM_Style_Node import LLM_Xml_Style_Injector
 from .Style_Saver_Node import LLM_Style_Saver
 
+WEB_DIRECTORY = "./js"
+
 NODE_CLASS_MAPPINGS = {
     "LLM_Prompt_Formatter": LLM_Prompt_Formatter,
     "LLM_Xml_Style_Injector": LLM_Xml_Style_Injector,
@@ -22,4 +24,4 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LLM_Style_Saver": "Style Preset Saver"
 }
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

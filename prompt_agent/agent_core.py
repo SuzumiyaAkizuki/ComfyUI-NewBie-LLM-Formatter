@@ -30,6 +30,7 @@ from prompt_agent.tools import (
 from prompt_agent.cache import (
     get_baseline_store, compute_edit, normalize as normalize_prompt,
 )
+from prompt_agent.agent_trace import emit_agent_trace
 from prompt_agent import utils
 
 try:
@@ -265,6 +266,16 @@ class PromptAgent:
         from LLM_Node import get_platform_settings
         self._extra_body = get_platform_settings(self.api_url, self.model_name, False)
 
+    def _trace(self, event, status="info", title="", summary="", details=None):
+        emit_agent_trace(
+            self.unique_id,
+            event,
+            status=status,
+            title=title,
+            summary=summary,
+            details=details,
+        )
+
     def _log_token_usage(self, usage):
         if usage:
             _log(f"Token: {usage.prompt_tokens} input + {usage.completion_tokens} output = {usage.total_tokens} used")
@@ -422,6 +433,56 @@ class PromptAgent:
                 _log("    未找到标签", _C.WARNING)
         except Exception:
             pass
+
+    def _tool_trace_summary(self, name, args):
+        if name == "search_tags":
+            return str(args.get("query", "")).strip()
+        if name == "get_related_tags":
+            tags = args.get("tags", [])
+            if isinstance(tags, str):
+                return tags[:120]
+            return ", ".join(map(str, tags[:4]))
+        if name == "get_artist_recommendations":
+            tags = args.get("tags", [])
+            if isinstance(tags, str):
+                return tags[:120]
+            return f"{len(tags)} tags"
+        if name in ("get_anima_format", "get_newbie_format"):
+            return "读取输出格式规范"
+        return ""
+
+    def _tool_result_summary(self, name, result_str):
+        if name in ("get_anima_format", "get_newbie_format"):
+            return f"{len(result_str)} chars"
+        try:
+            data = json.loads(result_str)
+        except Exception:
+            return f"{len(result_str)} chars"
+        if data.get("error"):
+            return str(data["error"])[:140]
+        results = data.get("results", [])
+        if isinstance(results, list) and results:
+            return f"{len(results)} tags"
+        prompt = data.get("prompt")
+        if isinstance(prompt, str) and prompt.strip():
+            return f"{len([t for t in prompt.split(',') if t.strip()])} prompt tags"
+        return "完成"
+
+    def _compact_tool_result(self, result_str):
+        try:
+            data = json.loads(result_str)
+        except Exception:
+            return {"text": result_str[:1200]}
+        compact = {}
+        for key in ("prompt", "error", "skipped", "note"):
+            value = data.get(key)
+            if value:
+                compact[key] = str(value)[:1200]
+        results = data.get("results")
+        if isinstance(results, list):
+            compact["results"] = results[:8]
+            compact["result_count"] = len(results)
+        return compact or {"text": result_str[:1200]}
 
     @staticmethod
     def _extract_tag_list(result_str: str) -> list[str]:
@@ -708,32 +769,86 @@ class PromptAgent:
         return content, forced_tokens
 
     def run(self, user_text, image=None, force_full_run=False):
+        self._trace(
+            "start",
+            status="running",
+            title="Agent started",
+            summary=f"{self.effort} · {self.mode}",
+            details={"effort": self.effort, "mode": self.mode},
+        )
         # ── 基线判定（所有 effort 通用）：复用 / 续写 / 冷跑 ──
         baseline = get_baseline_store().get(self.unique_id)
         if force_full_run:
             _log("Force full Agent run enabled: ignoring incremental baseline for this run.")
+            self._trace(
+                "path",
+                status="warning",
+                title="Force full run",
+                summary="忽略增量基线，本次完整运行",
+            )
             decision, edit = ("cold", None)
         else:
             decision, edit = self._decide_baseline(baseline, user_text, image)
         if decision == "reuse":
+            self._trace(
+                "complete",
+                status="success",
+                title="Reused previous result",
+                summary="零调用复用上次输出",
+                details={"path": "reuse"},
+            )
             return self._parse_output(baseline["output"])
 
         # Low effort：流水线冷跑 / 增量修订续写
         if self.effort == "Low":
             if decision == "continue":
+                self._trace(
+                    "path",
+                    status="running",
+                    title="Low continuation",
+                    summary="增量修订路径",
+                    details={"path": "continue", "edit": edit},
+                )
                 xml_out, text_out, content = self._run_low_continuation(user_text, baseline, edit)
             else:
+                self._trace(
+                    "path",
+                    status="running",
+                    title="Low cold run",
+                    summary="完整流水线路径",
+                    details={"path": "cold"},
+                )
                 xml_out, text_out, content = self._run_low_effort(user_text, image)
             self._store_baseline(user_text, content, image,
                                  baseline.get("format_spec") if baseline else None)
+            self._trace(
+                "complete",
+                status="success",
+                title="Agent complete",
+                summary="Low effort 输出已解析",
+            )
             return xml_out, text_out
 
         # Agent 模式：续写 / 冷跑
         _log_banner("Agent 模式已启用，开始处理用户输入...")
         _log(f"模式: {self.mode} | Effort: {self.effort} | MCP: HF (主) / MS (备)")
         if decision == "continue":
+            self._trace(
+                "path",
+                status="running",
+                title="Continuation",
+                summary=f"变更块 {edit['blocks']} · 相似度 {edit['ratio']:.2f}",
+                details={"path": "continue", "edit": edit},
+            )
             build = self._build_continuation(baseline, edit, user_text)
         else:
+            self._trace(
+                "path",
+                status="running",
+                title="Cold run",
+                summary="完整 Agent 探索",
+                details={"path": "cold"},
+            )
             build = self._build_cold_run(user_text, image)
         messages, max_rounds, provided_norm = build
 
@@ -742,6 +857,7 @@ class PromptAgent:
         )
 
         _log_section("输出解析")
+        self._trace("parse", status="running", title="Parsing output", summary=self.mode)
         xml_out, text_out = self._parse_output(content)
 
         # 压平存档：本次结果成为下次 diff 的基线（每节点只存上一次）。
@@ -750,6 +866,13 @@ class PromptAgent:
         self._store_baseline(user_text, content, image, fmt_spec)
 
         _log_banner(f"Agent 完成 | 总轮次: {rounds + 1} | 总 Token: {total_tokens}")
+        self._trace(
+            "complete",
+            status="success",
+            title="Agent complete",
+            summary=f"{rounds + 1} 轮 · {total_tokens} tokens",
+            details={"rounds": rounds + 1, "tokens": total_tokens},
+        )
         return xml_out, text_out
 
     def _decide_baseline(self, baseline, user_text, image):
@@ -763,12 +886,14 @@ class PromptAgent:
             return ("cold", None)
         if normalize_prompt(user_text) == baseline.get("norm_input"):
             _log_ok("输入与上次完全一致，直接复用上次结果（零调用）")
+            self._trace("path", status="success", title="Reuse", summary="输入与上次完全一致")
             return ("reuse", None)
         edit = compute_edit(baseline["raw_input"], user_text)
         _log(f"与上次 diff：变更块={edit['blocks']}，相似度={edit['ratio']:.2f}")
         if edit["blocks"] == 0:
             # 仅标点/空白变化，无实义 token 改动 → 标签集合不变，直接复用
             _log_ok("仅标点/空白变化，无实义改动，直接复用上次结果（零调用）")
+            self._trace("path", status="success", title="Reuse", summary="仅标点/空白变化")
             return ("reuse", None)
         if edit["continue"]:
             return ("continue", edit)
@@ -1000,6 +1125,13 @@ class PromptAgent:
             if _COMFY_AVAILABLE:
                 comfy.model_management.throw_exception_if_processing_interrupted()
             _log_round_header(rounds + 1)
+            self._trace(
+                "round",
+                status="running",
+                title="思考中...",
+                summary=f"Round {rounds + 1}/{max_rounds}",
+                details={"round": rounds + 1, "max_rounds": max_rounds, "phase": "thinking"},
+            )
             _tools = get_tools()
             _log(f"LLM 请求: {len(_tools)} tools available, {len(messages)} messages")
 
@@ -1025,8 +1157,9 @@ class PromptAgent:
                 self._log_token_usage(resp.usage)
 
             if finish_reason == "tool_calls" and tool_calls:
-                if content and content.strip():
-                    _log(f"LLM 工具调用附带 content: {content[:200]}{'...' if len(content) > 200 else ''}", _C.WARNING)
+                assistant_note = content.strip() if content else ""
+                if assistant_note:
+                    _log(f"LLM 工具调用附带 content: {assistant_note[:200]}{'...' if len(assistant_note) > 200 else ''}", _C.WARNING)
                 # 预先解析参数并过滤重复调用
                 parsed = []
                 skipped = []
@@ -1066,6 +1199,17 @@ class PromptAgent:
                     break
                 # 全量 tool_calls 放入 assistant 消息，确保与后续 tool response 一一对应
                 messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+                for tc, name, args in parsed:
+                    tool_details = {"round": rounds + 1, "tool_call_id": tc["id"], "arguments": args}
+                    if assistant_note:
+                        tool_details["message"] = assistant_note
+                    self._trace(
+                        "tool",
+                        status="running",
+                        title=name,
+                        summary=self._tool_trace_summary(name, args),
+                        details=tool_details,
+                    )
                 # 并行执行所有工具调用（HTTP I/O，无 GIL 竞争）
                 try:
                     with ThreadPoolExecutor(max_workers=min(len(parsed), 8)) as pool:
@@ -1098,6 +1242,21 @@ class PromptAgent:
                 for (tc, name, args), result in zip(parsed, results):
                     self._log_tool_call(name, args)
                     self._log_tool_result(name, result)
+                    result_details = {
+                        "round": rounds + 1,
+                        "tool_call_id": tc["id"],
+                        "arguments": args,
+                        "result": self._compact_tool_result(result),
+                    }
+                    if assistant_note:
+                        result_details["message"] = assistant_note
+                    self._trace(
+                        "tool",
+                        status="success",
+                        title=name,
+                        summary=self._tool_result_summary(name, result),
+                        details=result_details,
+                    )
                     tag_cn_map.update(self._collect_cn_from_result(result))
                     if name in ("get_anima_format", "get_newbie_format"):
                         captured_format = result  # 保留格式规范供续写复用
@@ -1147,6 +1306,13 @@ class PromptAgent:
                         f"低信息增量轮次（本轮新增 {round_new} 个标签），"
                         f"停滞计数 {stagnant_rounds}/{_STAGNATION_LIMIT}"
                     )
+                    self._trace(
+                        "notice",
+                        status="warning",
+                        title="Low novelty",
+                        summary=f"本轮新增 {round_new} 个标签",
+                        details={"stagnant_rounds": stagnant_rounds},
+                    )
                 else:
                     stagnant_rounds = 0
 
@@ -1156,6 +1322,12 @@ class PromptAgent:
 
                 if stagnant_rounds >= _STAGNATION_LIMIT:
                     _log_warn("连续低信息增量，提前结束探索，进入收尾输出")
+                    self._trace(
+                        "notice",
+                        status="warning",
+                        title="Early finish",
+                        summary="连续低信息增量，提前收尾",
+                    )
                     stagnated = True
                     break
 
