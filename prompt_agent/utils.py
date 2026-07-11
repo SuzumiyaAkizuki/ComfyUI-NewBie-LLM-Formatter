@@ -15,6 +15,7 @@ import io
 import re
 import base64
 import difflib
+import hashlib
 
 import numpy as np
 from PIL import Image
@@ -35,6 +36,20 @@ def tensor_to_base64(image_tensor):
     buffered = io.BytesIO()
     img.save(buffered, format="JPEG", quality=90)
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+
+def image_fingerprint(image_tensor):
+    """Return a stable fingerprint for the first ComfyUI image tensor."""
+    if image_tensor is None:
+        return None
+    first = image_tensor[0]
+    if hasattr(first, "detach"):
+        first = first.detach()
+    arr = np.clip(255.0 * first.cpu().numpy(), 0, 255).astype(np.uint8)
+    digest = hashlib.sha256()
+    digest.update(str(arr.shape).encode("ascii"))
+    digest.update(arr.tobytes())
+    return digest.hexdigest()
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -58,10 +58,41 @@ function resetSaveTriggerWithUiRefresh(nodeId) {
   window.setTimeout(() => resetSaveTrigger(nodeId, true), 120);
 }
 
+function scheduleSaveTriggerReset(nodeId) {
+  const runSoon = () => resetSaveTriggerWithUiRefresh(nodeId);
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(runSoon);
+  } else {
+    Promise.resolve().then(runSoon);
+  }
+}
+
+function installOneShotSerializeReset(node, widget) {
+  if (!node || !widget || widget.__newbieStyleSaverSerializeWrapped) return;
+  const key = nodeKey(node.id);
+  if (key) saverNodes.set(key, node);
+
+  const originalSerializeValue = widget.serializeValue;
+  widget.serializeValue = async function (...args) {
+    const widgetValue = originalSerializeValue
+      ? await originalSerializeValue.apply(this, args)
+      : this.value;
+
+    if (widgetValue === true) {
+      scheduleSaveTriggerReset(node.id);
+    }
+
+    return widgetValue;
+  };
+
+  widget.__newbieStyleSaverSerializeWrapped = true;
+}
+
 function rememberSaverNode(node) {
   const key = nodeKey(node?.id);
   if (!key) return;
   saverNodes.set(key, node);
+  installOneShotSerializeReset(node, getWidget(node, SAVE_WIDGET));
 }
 
 function handleExecuting(message) {
@@ -99,5 +130,14 @@ app.registerExtension({
   async nodeCreated(node) {
     if (node?.comfyClass !== NODE_CLASS) return;
     rememberSaverNode(node);
+    requestAnimationFrame(() => rememberSaverNode(node));
   },
 });
+
+export const __test__ = {
+  installOneShotSerializeReset,
+  rememberSaverNode,
+  resetSaveTrigger,
+  resetSaveTriggerWithUiRefresh,
+  syncWidgetValue,
+};

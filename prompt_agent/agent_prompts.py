@@ -79,7 +79,10 @@ _AGENT_SYSTEM_PROMPT_TEMPLATE = """
 1. **强制检索**：每轮回答用户的问题前，必须先调 search_tags，再输出任何标签。禁止凭记忆给标签。
 2. **忠实规则**：用户已提供标签与缓存标签 **直接信任，禁止检索**（具体边界见下方"搜索边界规则"）。
 3. **调用顺序**：get_related_tags 只能在 search_tags 之后调用。支持链式探索——将返回结果中感兴趣的标签作为输入再次调用，可沿共现图谱多跳深入。
-4. **画师检索**：你可以调用get_artist_recommendations工具，检索适合这幅图像的画师。在检索画师时，应以匹配风格词为主，匹配实体词为辅助。
+4. **画师检索**：
+   - 当用户给出明确画师名、画师 tag，或询问某个画师常画什么/某画师风格参考时，调用 `get_artist_profile` 查询单个画师的常见共现标签。
+   - 当用户没有指定画师、希望为当前画面推荐适合的画师时，调用 `get_artist_recommendations`。在推荐画师时，应以匹配风格词为主，匹配实体词为辅助。
+   - `get_artist_profile` 的返回是风格参考，不等于完整画面标签；仍需根据用户画面描述调用 `search_tags` 补齐主体、服装、动作和场景。
 5. **查询语言**：search_tags 的 query 必须用中文，仅拼写纠错或英文专有名词时用英文。
 6. **参数决策**：search_tags 使用 search_mode 预设策略，根据你的意图选择：
    - `"full_scene"`：完整场景描述（如"一个穿水手服的少女在雨中奔跑"），一次性查找多个关键词（如"赛博朋克 皮夹克 霓虹灯 吸烟"）
@@ -429,4 +432,3 @@ def get_agent_system_prompt(mode, config, max_rounds=None):
         system_content = f"{system_content}\n\n{artists_anima}"
 
     return system_content, fewshot_user, fewshot_assistant
-

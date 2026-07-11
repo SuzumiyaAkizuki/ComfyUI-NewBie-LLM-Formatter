@@ -120,6 +120,27 @@ _FALLBACK_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_artist_profile",
+            "description": (
+                "Look up one specific Danbooru artist in the artist co-occurrence database and return "
+                "the artist's common co-occurring tags as style references. Use when the user names a "
+                "specific artist or asks what an artist often draws. This is artist database lookup, "
+                "not general visual tag search."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "artist_name": {"type": "string", "description": "Artist name or Danbooru artist tag. Spaces, case differences, and underscores are accepted."},
+                    "top_n":      {"type": "integer", "description": "Maximum number of common tags returned. Default 20."},
+                    "show_nsfw":  {"type": "boolean", "description": "Include NSFW common tags. Default True."},
+                },
+                "required": ["artist_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_anima_format",
             "description": "返回 Anima 文生图模型的 Hybrid 混合提示词格式规范。当用户提到 Anima 提示词/Anima 格式/Anima Prompt/Anima 模型等关键词时，应在搜索标签完成、最终输出前调用此工具，以获取完整的提示词组装规范。",
             "parameters": {"type": "object", "properties": {}, "required": []},
@@ -440,6 +461,28 @@ def execute_get_artist_recommendations(
         "limit":     limit,
         "min_cooc":  min_cooc,
         "show_nsfw": show_nsfw,
+    })
+
+    if "error" in data:
+        return json.dumps({"error": data["error"]}, ensure_ascii=False)
+
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def execute_get_artist_profile(
+    artist_name: str,
+    top_n: int = 20,
+    show_nsfw: bool = True,
+) -> str:
+    """调用 MCP get_artist_profile，查询单个画师的常见共现标签。"""
+    artist_name = str(artist_name or "").strip()
+    if not artist_name:
+        return json.dumps({"error": "artist_name 为空"}, ensure_ascii=False)
+
+    data = _call_mcp("get_artist_profile", {
+        "artist_name": artist_name,
+        "top_n":      top_n,
+        "show_nsfw":  show_nsfw,
     })
 
     if "error" in data:
