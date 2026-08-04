@@ -39,7 +39,7 @@
 
 - 如果你已经有一组标签，直接在输入框粘贴（逗号分隔），Agent 会识别并跳过搜索，1 轮完成。
 - 混合输入（标签 + 自然语言描述）会只搜索自然语言部分涉及的维度，不会浪费轮次。
-- 控制台会显示 `[Agent]` 前缀的详细日志，可以观察每轮的搜索内容和 Token 消耗。
+- 控制台会显示 `[Agent]` 前缀的详细日志，可以观察每轮的搜索内容和 Token 消耗；开启 `thinking` 后，还会实时流式显示模型返回的思考内容。
 
 </details>
 
@@ -204,7 +204,7 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | `api_url` | STRING | API 主机地址。若配置文件中已有有效值，此处输入不生效。 |
 | `model_name` | STRING/下拉框 | 模型名称。若配置文件中的 `model_list` 有效，显示为下拉框；否则显示为文本输入框。 |
 | `mode` | 下拉框 | **NewBie**（默认）或 **Anima**。决定使用哪套 system prompt 以及输出解析方式。 |
-| `thinking` | BOOLEAN | 深度思考模式开关。`true` 时模型进行深度思考，思考过程输出到控制台。**推荐设置为 `false`。** Agent 模式下此开关被强制关闭。 |
+| `thinking` | BOOLEAN | 深度思考模式开关。普通模式和 Agent 模式均生效。`true` 时 Agent 会流式读取并在控制台实时显示模型返回的 `reasoning_content` / `reasoning` / `reasoning_details`，工具调用轮次会原样回传推理字段；这些内容不会混入节点输出。思考模式通常更慢且消耗更多 Token。 |
 | `agent_effort` | 下拉框 | **[v1.2.9 新增]** Agent 努力等级。`Close`（默认）= 关闭 Agent，走普通模式；`Low` = 流水线模式（单轮批量搜索 + LLM 组装，不走 Agent 循环，最快）；`Medium` = Agent 循环模式（`full_scene` 预设，平衡召回质量与收敛速度，最多 8 轮）；`High` = Agent 循环模式（`concept_explore` 宽召回预设 + 默认携带 wiki 释义，最多 10 轮，最深入）。 |
 | `force_full_agent_run` | BOOLEAN | 强制本次 Agent 从头生成，不复用上一轮结果。通常保持关闭；当你觉得上一轮缓存影响了本次修改时，再临时打开。 |
 | `user_text` | STRING | 待转换的自然语言描述或标签集。 |
@@ -251,7 +251,7 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | `xiaomi/mimo-v2-flash` | ~0.0004 | 较好 | 一般 | — |
 | `cognitivecomputations/dolphin-mistral-24b-venice-edition:free` | 免费 | 官方宣称无审查 | 较差 | — |
 
-> **思考模式说明：** 目前适配了 OpenRouter、DeepSeek、Google AI、Anthropic 官方、Kimi、小米 MIMO 和 Vercel AI Gateway 平台。其他平台请通过模型名称控制（如用 `deepseek-chat` 代替 `deepseek-reasoner`）。
+> **思考模式说明：** 目前适配了 OpenRouter、DeepSeek、Google AI、Anthropic 官方、Kimi、小米 MIMO 和 Vercel AI Gateway 平台，普通模式和 Agent 模式均可使用。Agent 会优先流式展示平台实际返回的思考内容；若网关不支持流式，则自动回退为非流式并在请求完成后显示。部分模型只返回隐藏/加密推理或不返回可见思考文本，此时不会有可展示的思维链。其他平台请通过模型名称控制（如用 `deepseek-chat` 代替 `deepseek-reasoner`）。
 >
 > **免费额度提示：** 在 [DeepSeek 开放平台](https://platform.deepseek.com) 注册后可获赠 10 元免费额度，大约可使用 1000 次。
 

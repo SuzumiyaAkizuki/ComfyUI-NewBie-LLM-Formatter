@@ -7,9 +7,17 @@ LLM_Prompt_Formatter 的 Agent 核心循环。
 from __future__ import annotations
 
 import json
+import platform
 import re
 import sys
+import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from itertools import chain
+from pathlib import Path
+from types import SimpleNamespace
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from openai import OpenAI
 
@@ -56,6 +64,13 @@ _PROVIDED_TOPK = 3
 _REVISION_MAX_ROUNDS = 3
 # 同一节点连续续写达到此次数后，下一次小改自动完整重跑，避免长期局部修订漂移
 _MAX_CONSECUTIVE_CONTINUATIONS = 5
+# Agent LLM 请求失败后的指数退避：首次请求之外再重试 3 次。
+_COMPLETION_RETRY_DELAYS = (1, 2, 4)
+_ERROR_DIR = Path(__file__).resolve().parent.parent / "error"
+
+
+class _StreamUnavailableError(RuntimeError):
+    """Raised only when a streaming request fails before its first chunk."""
 
 
 def _sanitize_messages_for_gemini(messages):
@@ -130,21 +145,130 @@ def _sanitize_messages_for_gemini(messages):
     return result
 
 
-def _dump_request_debug(sanitized_messages, tools):
-    """API 调用失败时，将实际发送给 API 的完整请求体输出为 debug 日志。"""
-    import json as _json
-    payload = {
-        "model": "(see agent_core.py model_name)",
-        "messages": sanitized_messages,
-        "tools": tools,
-    }
+_SENSITIVE_HEADERS = {
+    "authorization", "proxy-authorization", "x-api-key", "api-key",
+    "cookie", "set-cookie",
+}
+_SENSITIVE_QUERY_KEYS = {"api_key", "apikey", "key", "token", "access_token"}
+
+
+def _redact_headers(headers):
+    """保留诊断所需请求头，但绝不把认证信息写进日志。"""
+    if headers is None:
+        return None
     try:
-        blob = _json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+        items = headers.items()
     except Exception:
-        blob = str(payload)
-    _log_error("── 请求体 DEBUG DUMP ──")
-    print(blob, file=sys.stderr, flush=True)
-    _log_error("── DEBUG DUMP END ──")
+        return str(headers)
+    return {
+        str(key): "<redacted>" if str(key).lower() in _SENSITIVE_HEADERS else str(value)
+        for key, value in items
+    }
+
+
+def _redact_url(url):
+    if not url:
+        return None
+    try:
+        parts = urlsplit(str(url))
+        query = urlencode([
+            (key, "<redacted>" if key.lower() in _SENSITIVE_QUERY_KEYS else value)
+            for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        ])
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+    except Exception:
+        return str(url)
+
+
+def _body_text(message):
+    if message is None:
+        return None
+    for attr in ("text", "content"):
+        try:
+            value = getattr(message, attr, None)
+        except Exception:
+            continue
+        if value is None:
+            continue
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return str(value)
+    return None
+
+
+def format_agent_error_summary(error):
+    """生成可安全展示在控制台的短摘要，不包含响应体。"""
+    status = getattr(error, "status_code", None)
+    if status is None:
+        status = getattr(getattr(error, "response", None), "status_code", None)
+    suffix = f" (HTTP {status})" if status is not None else ""
+    return f"{type(error).__name__}{suffix}"
+
+
+def _http_exchange(error):
+    request = getattr(error, "request", None)
+    response = getattr(error, "response", None)
+    return {
+        "request": None if request is None else {
+            "method": getattr(request, "method", None),
+            "url": _redact_url(getattr(request, "url", None)),
+            "headers": _redact_headers(getattr(request, "headers", None)),
+            "body": _body_text(request),
+        },
+        "response": None if response is None else {
+            "status_code": getattr(response, "status_code", None),
+            "reason_phrase": getattr(response, "reason_phrase", None),
+            "headers": _redact_headers(getattr(response, "headers", None)),
+            "body": _body_text(response),
+        },
+    }
+
+
+def _new_error_log_path():
+    _ERROR_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+    return _ERROR_DIR / f"{timestamp}.log"
+
+
+def write_agent_error_log(
+        error, *, context=None, completion_args=None, completion_response=None,
+        log_path=None):
+    """把完整 Agent 错误诊断写入项目 error 目录；同一重试链追加到同一文件。"""
+    try:
+        path = Path(log_path) if log_path else _new_error_log_path()
+        exchange = _http_exchange(error)
+        record = {
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "context": context or {},
+            "environment": {
+                "python": sys.version,
+                "platform": platform.platform(),
+            },
+            "exception": {
+                "type": type(error).__name__,
+                "message": str(error),
+                "repr": repr(error),
+                "traceback": "".join(traceback.format_exception(
+                    type(error), error, error.__traceback__,
+                )),
+            },
+            "completion_arguments": completion_args,
+            "completion_response": completion_response,
+            "sdk_http": exchange,
+        }
+        with path.open("a", encoding="utf-8") as handle:
+            if path.stat().st_size > 0:
+                handle.write("\n\n" + "=" * 80 + "\n")
+            json.dump(record, handle, ensure_ascii=False, indent=2, default=str)
+            handle.write("\n")
+        try:
+            setattr(error, "_agent_error_log_path", str(path))
+        except Exception:
+            pass
+        return str(path)
+    except Exception as log_error:
+        _log_error(f"错误诊断日志写入失败: {format_agent_error_summary(log_error)}")
+        return None
 
 
 class _C:
@@ -214,17 +338,60 @@ _EFFORT_CONFIG = {
 
 
 def _serialize_tool_calls(tool_calls):
-    """将 OpenAI tool_calls 对象序列化为 JSON-serializable dict 列表。"""
+    """序列化 tool_calls，并保留网关附加的 thought signature 等字段。"""
     if not tool_calls:
         return []
     result = []
     for tc in tool_calls:
-        result.append({
-            "id": tc.id,
-            "type": tc.type,
-            "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-        })
+        if hasattr(tc, "model_dump"):
+            item = tc.model_dump(exclude_none=True)
+        else:
+            item = {
+                "id": tc.id,
+                "type": tc.type,
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for key, value in vars(tc).items():
+                if key not in ("index", "id", "type", "function") and value is not None:
+                    item[key] = _plain_data(value)
+            for key, value in vars(tc.function).items():
+                if key not in ("name", "arguments") and value is not None:
+                    item["function"][key] = _plain_data(value)
+        item.pop("index", None)
+        result.append(_plain_data(item))
     return result
+
+
+def _plain_data(value):
+    """Convert SDK response models into request-safe plain Python data."""
+    if hasattr(value, "model_dump"):
+        return value.model_dump(exclude_none=True)
+    if isinstance(value, dict):
+        return {key: _plain_data(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_data(item) for item in value]
+    if hasattr(value, "__dict__"):
+        return {
+            key: _plain_data(item)
+            for key, item in vars(value).items()
+            if item is not None
+        }
+    return value
+
+
+def _reasoning_text_from_details(details):
+    """Extract displayable text without changing reasoning_details replay data."""
+    parts = []
+    for item in _plain_data(details) or []:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text") or item.get("summary")
+        if text:
+            parts.append(str(text))
+    return "".join(parts)
 
 
 def _message_text_from_content_or_reasoning(message):
@@ -246,15 +413,22 @@ def _message_text_from_content_or_reasoning(message):
 
 
 def _assistant_tool_message(content, tool_calls, source_message=None):
-    """Build assistant history for a tool-call turn, preserving reasoning_content.
+    """Build assistant history with one canonical provider reasoning field.
 
-    DeepSeek requires reasoning_content from assistant tool-call turns to be
-    returned in subsequent requests when thinking mode produced it.
+    DeepSeek requires ``reasoning_content`` on tool-call turns. OpenRouter and
+    other compatible gateways may instead return ``reasoning`` or structured
+    ``reasoning_details`` (including encrypted/signature-bearing blocks).
+
+    Some gateways expose the same reasoning through two or three aliases at
+    once. Replaying all aliases duplicates the same chain in the next request,
+    so prefer the lossless structured representation and send exactly one.
     """
     message = {"role": "assistant", "content": content, "tool_calls": tool_calls}
-    reasoning_content = getattr(source_message, "reasoning_content", None)
-    if reasoning_content and str(reasoning_content).strip():
-        message["reasoning_content"] = reasoning_content
+    for field in ("reasoning_details", "reasoning_content", "reasoning"):
+        value = getattr(source_message, field, None)
+        if value is not None and (not isinstance(value, str) or value.strip()):
+            message[field] = _plain_data(value)
+            break
     return message
 
 
@@ -280,7 +454,7 @@ class PromptAgent:
         self._effort_cfg = _EFFORT_CONFIG.get(effort, _EFFORT_CONFIG["Medium"])
         self.llm = OpenAI(api_key=api_key, base_url=api_url)
         from LLM_Node import get_platform_settings
-        self._extra_body = get_platform_settings(self.api_url, self.model_name, False)
+        self._extra_body = get_platform_settings(self.api_url, self.model_name, self.thinking)
 
     def _trace(self, event, status="info", title="", summary="", details=None):
         emit_agent_trace(
@@ -295,6 +469,299 @@ class PromptAgent:
     def _log_token_usage(self, usage):
         if usage:
             _log(f"Token: {usage.prompt_tokens} input + {usage.completion_tokens} output = {usage.total_tokens} used")
+
+    @staticmethod
+    def _strip_inline_thinking(message):
+        """Remove legacy <think> blocks from visible content and return their text."""
+        content = getattr(message, "content", None) or ""
+        matches = re.findall(r"<think>(.*?)</think>", content, flags=re.DOTALL | re.IGNORECASE)
+        if not matches:
+            return ""
+        message.content = re.sub(
+            r"<think>.*?</think>", "", content,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+        return "\n".join(part.strip() for part in matches if part.strip())
+
+    @staticmethod
+    def _reasoning_fields(message):
+        """Yield visible reasoning fields in provider-preference order."""
+        for field in ("reasoning_content", "reasoning"):
+            value = getattr(message, field, None)
+            if value and str(value).strip():
+                yield field, str(value)
+        details = getattr(message, "reasoning_details", None)
+        detail_text = _reasoning_text_from_details(details)
+        if detail_text.strip():
+            yield "reasoning_details", detail_text
+
+    def _log_non_stream_reasoning(self, response, purpose):
+        """Show provider-returned reasoning when streaming is unavailable."""
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            return
+        message = choices[0].message
+        displayed = False
+        for field, reasoning in self._reasoning_fields(message):
+            if displayed:
+                break
+            _log_section(f"模型思考 · {purpose} · {field}")
+            print(reasoning, file=sys.stderr, flush=True)
+            displayed = True
+        inline = self._strip_inline_thinking(message)
+        if inline and not displayed:
+            _log_section(f"模型思考 · {purpose} · <think>")
+            print(inline, file=sys.stderr, flush=True)
+            displayed = True
+        if not displayed:
+            _log_warn(f"{purpose} 已启用思考，但模型/网关未返回可显示的思考内容")
+
+    def _consume_completion_stream(self, stream, purpose):
+        """Aggregate an OpenAI-compatible stream while printing reasoning live."""
+        content_parts = []
+        reasoning_parts = {"reasoning_content": [], "reasoning": []}
+        reasoning_details = []
+        tool_call_parts = {}
+        finish_reason = None
+        usage = None
+        display_field = None
+        displayed_any = False
+
+        iterator = iter(stream)
+        try:
+            first_chunk = next(iterator)
+        except StopIteration:
+            first_chunk = None
+        except Exception as error:
+            raise _StreamUnavailableError(str(error)) from error
+
+        for chunk in chain(() if first_chunk is None else (first_chunk,), iterator):
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage is not None:
+                usage = chunk_usage
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            choice = choices[0]
+            if getattr(choice, "finish_reason", None) is not None:
+                finish_reason = choice.finish_reason
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                continue
+
+            content = getattr(delta, "content", None)
+            if content:
+                content_parts.append(str(content))
+
+            for field in ("reasoning_content", "reasoning"):
+                part = getattr(delta, field, None)
+                if not part:
+                    continue
+                part = str(part)
+                reasoning_parts[field].append(part)
+                if display_field is None:
+                    display_field = field
+                    _log_section(f"模型思考 · {purpose} · {field}")
+                if display_field == field:
+                    print(part, end="", file=sys.stderr, flush=True)
+                    displayed_any = True
+
+            details = getattr(delta, "reasoning_details", None)
+            if details:
+                plain_details = _plain_data(details)
+                reasoning_details.extend(plain_details)
+                detail_text = _reasoning_text_from_details(plain_details)
+                if detail_text and display_field is None:
+                    display_field = "reasoning_details"
+                    _log_section(f"模型思考 · {purpose} · reasoning_details")
+                if detail_text and display_field == "reasoning_details":
+                    print(detail_text, end="", file=sys.stderr, flush=True)
+                    displayed_any = True
+
+            for tool_delta in getattr(delta, "tool_calls", None) or []:
+                index = getattr(tool_delta, "index", None)
+                if index is None:
+                    index = len(tool_call_parts)
+                state = tool_call_parts.setdefault(index, {
+                    "id": "", "type": "function", "name": "", "arguments": "",
+                    "extras": {}, "function_extras": {},
+                })
+                if getattr(tool_delta, "id", None):
+                    state["id"] = tool_delta.id
+                if getattr(tool_delta, "type", None):
+                    state["type"] = tool_delta.type
+                function = getattr(tool_delta, "function", None)
+                if function is not None:
+                    if getattr(function, "name", None):
+                        state["name"] += function.name
+                    if getattr(function, "arguments", None):
+                        state["arguments"] += function.arguments
+                plain_delta = _plain_data(tool_delta)
+                if isinstance(plain_delta, dict):
+                    for key, value in plain_delta.items():
+                        if key not in ("index", "id", "type", "function") and value is not None:
+                            state["extras"][key] = value
+                    plain_function = plain_delta.get("function")
+                    if isinstance(plain_function, dict):
+                        for key, value in plain_function.items():
+                            if key not in ("name", "arguments") and value is not None:
+                                state["function_extras"][key] = value
+
+        if displayed_any:
+            print(file=sys.stderr, flush=True)
+
+        tool_calls = []
+        for index in sorted(tool_call_parts):
+            state = tool_call_parts[index]
+            tool_calls.append(SimpleNamespace(
+                id=state["id"],
+                type=state["type"],
+                function=SimpleNamespace(
+                    name=state["name"],
+                    arguments=state["arguments"],
+                    **state["function_extras"],
+                ),
+                **state["extras"],
+            ))
+
+        message = SimpleNamespace(
+            content="".join(content_parts),
+            tool_calls=tool_calls or None,
+            reasoning_content="".join(reasoning_parts["reasoning_content"]) or None,
+            reasoning="".join(reasoning_parts["reasoning"]) or None,
+            reasoning_details=reasoning_details or None,
+        )
+        inline = self._strip_inline_thinking(message)
+        if inline and not displayed_any:
+            _log_section(f"模型思考 · {purpose} · <think>")
+            print(inline, file=sys.stderr, flush=True)
+            displayed_any = True
+        if not displayed_any:
+            _log_warn(f"{purpose} 已启用思考，但模型/网关未返回可显示的思考内容")
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason=finish_reason)],
+            usage=usage,
+        )
+
+    def _completion_error_context(self, purpose, attempt, phase="request"):
+        return {
+            "purpose": purpose,
+            "phase": phase,
+            "attempt": attempt,
+            "max_attempts": len(_COMPLETION_RETRY_DELAYS) + 1,
+            "model": getattr(self, "model_name", None),
+            "api_url": _redact_url(getattr(self, "api_url", None)),
+            "mode": getattr(self, "mode", None),
+            "effort": getattr(self, "effort", None),
+            "thinking": bool(getattr(self, "thinking", False)),
+            "unique_id": getattr(self, "unique_id", None),
+        }
+
+    @staticmethod
+    def _raise_if_interrupted(error):
+        if (_COMFY_AVAILABLE
+                and isinstance(error, comfy.model_management.InterruptProcessingException)):
+            raise error
+
+    def _create_completion_once(self, *, purpose="LLM", **kwargs):
+        """执行一次逻辑请求，并保留 thinking 流式到非流式的兼容回退。"""
+        if not getattr(self, "thinking", False):
+            return self.llm.chat.completions.create(**kwargs)
+
+        try:
+            stream = self.llm.chat.completions.create(stream=True, **kwargs)
+        except Exception as stream_error:
+            self._raise_if_interrupted(stream_error)
+            log_path = write_agent_error_log(
+                stream_error,
+                context=self._completion_error_context(
+                    purpose, 1, phase="streaming_compatibility_fallback",
+                ),
+                completion_args={**kwargs, "stream": True},
+            )
+            log_hint = f"；完整诊断: {log_path}" if log_path else ""
+            _log_warn(
+                f"{purpose} 流式请求不可用，回退非流式: "
+                f"{format_agent_error_summary(stream_error)}{log_hint}"
+            )
+            response = self.llm.chat.completions.create(**kwargs)
+            self._log_non_stream_reasoning(response, purpose)
+            return response
+
+        # A few compatibility layers ignore stream=True and return a normal response.
+        choices = getattr(stream, "choices", None)
+        if choices and getattr(choices[0], "message", None) is not None:
+            self._log_non_stream_reasoning(stream, purpose)
+            return stream
+        try:
+            return self._consume_completion_stream(stream, purpose)
+        except _StreamUnavailableError as stream_error:
+            log_path = write_agent_error_log(
+                stream_error,
+                context=self._completion_error_context(
+                    purpose, 1, phase="stream_consumption_compatibility_fallback",
+                ),
+                completion_args={**kwargs, "stream": True},
+            )
+            log_hint = f"；完整诊断: {log_path}" if log_path else ""
+            _log_warn(
+                f"{purpose} 流式响应不可用，回退非流式: "
+                f"{format_agent_error_summary(stream_error)}{log_hint}"
+            )
+            response = self.llm.chat.completions.create(**kwargs)
+            self._log_non_stream_reasoning(response, purpose)
+            return response
+
+    def _create_completion(self, *, purpose="LLM", **kwargs):
+        """统一 LLM 调用入口：失败后按 1s/2s/4s 指数退避重试三次。"""
+        log_path = None
+        max_attempts = len(_COMPLETION_RETRY_DELAYS) + 1
+        for attempt in range(1, max_attempts + 1):
+            if _COMFY_AVAILABLE:
+                comfy.model_management.throw_exception_if_processing_interrupted()
+            try:
+                return self._create_completion_once(purpose=purpose, **kwargs)
+            except Exception as error:
+                self._raise_if_interrupted(error)
+                log_path = write_agent_error_log(
+                    error,
+                    context=self._completion_error_context(purpose, attempt),
+                    completion_args=kwargs,
+                    log_path=log_path,
+                )
+                summary = format_agent_error_summary(error)
+                log_hint = f"；完整诊断: {log_path}" if log_path else ""
+                if attempt >= max_attempts:
+                    _log_error(
+                        f"{purpose} 请求失败，三次重试均未恢复: {summary}{log_hint}"
+                    )
+                    raise
+
+                delay = _COMPLETION_RETRY_DELAYS[attempt - 1]
+                _log_warn(
+                    f"{purpose} 请求失败: {summary}；{delay}s 后进行第 "
+                    f"{attempt}/{len(_COMPLETION_RETRY_DELAYS)} 次重试{log_hint}"
+                )
+                self._trace(
+                    "retry",
+                    status="warning",
+                    title="LLM retry",
+                    summary=f"{purpose} · {delay}s 后重试",
+                    details={
+                        "purpose": purpose,
+                        "retry": attempt,
+                        "max_retries": len(_COMPLETION_RETRY_DELAYS),
+                        "delay_seconds": delay,
+                        "error_type": type(error).__name__,
+                        "status_code": getattr(
+                            getattr(error, "response", None), "status_code", None,
+                        ),
+                        "log_path": log_path,
+                    },
+                )
+                time.sleep(delay)
+
+        raise RuntimeError("unreachable")
 
     def _rewrite_query(self, question, image=None):
         _log_section("查询重写")
@@ -315,11 +782,11 @@ class PromptAgent:
         for attempt, extra_body in enumerate(extra_body_list):
             raw = None
             try:
-                resp = self.llm.chat.completions.create(
+                resp = self._create_completion(
+                    purpose="查询重写",
                     model=self.model_name,
                     messages=[{"role": "user", "content": user_content}],
                     temperature=0.3,
-                    max_tokens=10240,
                     extra_body=extra_body,
                 )
                 choice = resp.choices[0]
@@ -357,9 +824,12 @@ class PromptAgent:
                     return user_tags, dimensions
             except Exception as e:
                 if attempt == 0 and len(extra_body_list) > 1:
-                    _log_warn(f"查询重写失败（{e}），去掉 reasoning 参数重试...")
+                    _log_warn(
+                        f"查询重写失败（{format_agent_error_summary(e)}），"
+                        "去掉 reasoning 参数重试..."
+                    )
                     continue
-                _log_warn(f"查询重写失败（已跳过）: {e}")
+                _log_warn(f"查询重写失败（已跳过）: {format_agent_error_summary(e)}")
                 if raw is not None:
                     _log_warn(f"LLM 响应体: {raw[:500]}")
         return "", []
@@ -615,13 +1085,14 @@ class PromptAgent:
         else:
             messages.append({"role": "user", "content": user_content})
         try:
-            resp = self.llm.chat.completions.create(
+            resp = self._create_completion(
+                purpose="回退生成",
                 model=self.model_name, messages=messages,
-                temperature=0.7, max_tokens=10240, extra_body=self._extra_body,
+                temperature=0.7, extra_body=self._extra_body,
             )
             content = resp.choices[0].message.content or ""
         except Exception as e:
-            _log_error(f"回退模式 LLM 调用失败: {e}")
+            _log_error(f"回退模式 LLM 调用失败: {format_agent_error_summary(e)}")
             raise
         _log_section("输出解析")
         xml_out, text_out = self._parse_output(content)
@@ -682,10 +1153,11 @@ class PromptAgent:
         ]
 
         try:
-            resp = self.llm.chat.completions.create(
+            resp = self._create_completion(
+                purpose="标签关联探索",
                 model=self.model_name, messages=step3_messages,
                 tools=tools_related, tool_choice="auto",
-                temperature=0.7, max_tokens=500,
+                temperature=0.7,
                 extra_body=self._extra_body,
             )
             msg = resp.choices[0].message
@@ -720,7 +1192,10 @@ class PromptAgent:
                     except Exception:
                         pass
         except Exception as e:
-            _log_warn(f"Step 3 LLM 调用失败（已跳过关联探索）: {e}")
+            _log_warn(
+                f"Step 3 LLM 调用失败（已跳过关联探索）: "
+                f"{format_agent_error_summary(e)}"
+            )
 
         _log(f"最终标签集合: {len(all_tag_names)} 个")
         return all_tag_names
@@ -758,15 +1233,16 @@ class PromptAgent:
             assembly_messages.append({"role": "user", "content": user_content})
 
         try:
-            resp = self.llm.chat.completions.create(
+            resp = self._create_completion(
+                purpose="最终提示词组装",
                 model=self.model_name, messages=assembly_messages,
-                temperature=0.7, max_tokens=10240, extra_body=self._extra_body,
+                temperature=0.7, extra_body=self._extra_body,
             )
             content = resp.choices[0].message.content or ""
             if resp.usage:
                 self._log_token_usage(resp.usage)
         except Exception as e:
-            _log_error(f"组装阶段 LLM 调用失败: {e}")
+            _log_error(f"组装阶段 LLM 调用失败: {format_agent_error_summary(e)}")
             raise
 
         _log_section("输出解析")
@@ -830,17 +1306,18 @@ class PromptAgent:
             "content": "请根据已收集到的标签信息直接输出最终 prompt，禁止再调用任何工具。",
         })
         try:
-            resp = self.llm.chat.completions.create(
+            resp = self._create_completion(
+                purpose="强制收尾",
                 model=self.model_name,
                 messages=_sanitize_messages_for_gemini(messages),
-                temperature=0.7, max_tokens=10240, extra_body=self._extra_body,
+                temperature=0.7, extra_body=self._extra_body,
             )
             content = resp.choices[0].message.content or ""
             forced_tokens = resp.usage.total_tokens if resp.usage else 0
             if resp.usage:
                 self._log_token_usage(resp.usage)
         except Exception as e:
-            _log_error(f"强制输出 LLM 调用失败: {e}")
+            _log_error(f"强制输出 LLM 调用失败: {format_agent_error_summary(e)}")
             raise
         return content, forced_tokens
 
@@ -1078,15 +1555,16 @@ class PromptAgent:
             {"role": "user", "content": revise_directive},
         ]
         try:
-            resp = self.llm.chat.completions.create(
+            resp = self._create_completion(
+                purpose="增量修订",
                 model=self.model_name, messages=messages,
-                temperature=0.7, max_tokens=10240, extra_body=self._extra_body,
+                temperature=0.7, extra_body=self._extra_body,
             )
             content = resp.choices[0].message.content or ""
             if resp.usage:
                 self._log_token_usage(resp.usage)
         except Exception as e:
-            _log_error(f"Low 修订 LLM 调用失败: {e}")
+            _log_error(f"Low 修订 LLM 调用失败: {format_agent_error_summary(e)}")
             raise
 
         _log_section("输出解析")
@@ -1245,33 +1723,75 @@ class PromptAgent:
             self._trace(
                 "round",
                 status="running",
-                title="思考中...",
+                title="深度思考中..." if getattr(self, "thinking", False) else "思考中...",
                 summary=f"Round {rounds + 1}/{max_rounds}",
-                details={"round": rounds + 1, "max_rounds": max_rounds, "phase": "thinking"},
+                details={
+                    "round": rounds + 1,
+                    "max_rounds": max_rounds,
+                    "phase": "thinking",
+                    "thinking_enabled": bool(getattr(self, "thinking", False)),
+                },
             )
             _tools = get_tools()
             _log(f"LLM 请求: {len(_tools)} tools available, {len(messages)} messages")
 
             _messages = _sanitize_messages_for_gemini(messages)
+            request_args = {
+                "model": self.model_name,
+                "messages": _messages,
+                "tools": _tools,
+                "tool_choice": "auto",
+                "temperature": 0.7,
+                "extra_body": self._extra_body,
+            }
+            resp = None
             try:
-                resp = self.llm.chat.completions.create(
-                    model=self.model_name, messages=_messages, tools=_tools,
-                    tool_choice="auto", temperature=0.7, max_tokens=10240,
-                    extra_body=self._extra_body,
+                resp = self._create_completion(
+                    purpose=f"Agent Round {rounds + 1}",
+                    **request_args,
                 )
+                choices = getattr(resp, "choices", None) or []
+                if not choices:
+                    raise ValueError("LLM API 返回了空 choices。")
+                msg = choices[0].message
+                content = msg.content or ""
+                tool_calls = _serialize_tool_calls(msg.tool_calls)
+                finish_reason = choices[0].finish_reason
+
+                if resp.usage:
+                    total_tokens += resp.usage.total_tokens
+                    self._log_token_usage(resp.usage)
             except Exception as e:
-                _log_error(f"LLM API 调用失败: {e}")
-                _dump_request_debug(_messages, _tools)
-                raise
-
-            msg = resp.choices[0].message
-            content = msg.content or ""
-            tool_calls = _serialize_tool_calls(msg.tool_calls)
-            finish_reason = resp.choices[0].finish_reason
-
-            if resp.usage:
-                total_tokens += resp.usage.total_tokens
-                self._log_token_usage(resp.usage)
+                self._raise_if_interrupted(e)
+                log_path = getattr(e, "_agent_error_log_path", None)
+                if not log_path:
+                    log_path = write_agent_error_log(
+                        e,
+                        context=self._completion_error_context(
+                            f"Agent Round {rounds + 1}", 1,
+                            phase="response_processing",
+                        ),
+                        completion_args=request_args,
+                        completion_response=_plain_data(resp),
+                    )
+                _log_warn(
+                    f"第 {rounds + 1} 轮无法继续（请求重试耗尽或响应无法解析），"
+                    "改用当前已收集的信息直接作答"
+                )
+                self._trace(
+                    "round_recovery",
+                    status="warning",
+                    title="Direct final answer",
+                    summary=f"Round {rounds + 1} 失败，基于已有信息收尾",
+                    details={
+                        "round": rounds + 1,
+                        "error_type": type(e).__name__,
+                        "log_path": log_path,
+                    },
+                )
+                content, forced_tokens = self._force_final_output(messages)
+                total_tokens += forced_tokens
+                return content, rounds, total_tokens, captured_format
 
             if finish_reason == "tool_calls" and tool_calls:
                 assistant_note = content.strip() if content else ""
@@ -1339,13 +1859,15 @@ class PromptAgent:
                             try:
                                 results.append(f.result(timeout=60))
                             except Exception as e:
-                                _log_error(f"工具调用超时或异常: {e}")
+                                _log_error(
+                                    f"工具调用超时或异常: {format_agent_error_summary(e)}"
+                                )
                                 results.append(json.dumps(
                                     {"found": False, "error": str(e)},
                                     ensure_ascii=False,
                                 ))
                 except Exception as e:
-                    _log_error(f"并行工具调用失败: {e}")
+                    _log_error(f"并行工具调用失败: {format_agent_error_summary(e)}")
                     # 为所有未响应的 tool_calls 添加错误 response，保证一一对应
                     for tc, _, _ in parsed:
                         messages.append({"role": "tool", "tool_call_id": tc["id"],

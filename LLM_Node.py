@@ -2,7 +2,11 @@ import os
 import re
 import json
 from openai import OpenAI
-from prompt_agent.agent_core import PromptAgent
+from prompt_agent.agent_core import (
+    PromptAgent,
+    format_agent_error_summary,
+    write_agent_error_log,
+)
 from prompt_agent.agent_trace import emit_agent_trace
 from prompt_agent import utils
 import comfy.utils
@@ -318,15 +322,40 @@ class LLM_Prompt_Formatter:
             except comfy.model_management.InterruptProcessingException:
                 raise
             except Exception as e:
+                log_path = getattr(e, "_agent_error_log_path", None)
+                if not log_path:
+                    log_path = write_agent_error_log(
+                        e,
+                        context={
+                            "purpose": "Agent unhandled error",
+                            "model": model_name,
+                            "mode": mode,
+                            "effort": agent_effort,
+                            "thinking": bool(thinking),
+                            "unique_id": unique_id,
+                        },
+                    )
+                error_summary = format_agent_error_summary(e)
                 emit_agent_trace(
                     unique_id,
-                    "fallback",
+                    "error",
                     status="error",
-                    title="Agent fallback",
-                    summary="Agent 失败，已回退普通模式",
-                    details={"error": str(e)},
+                    title="Agent failed",
+                    summary="Agent 收尾请求仍失败，未回退普通模式",
+                    details={
+                        "error_type": type(e).__name__,
+                        "log_path": log_path,
+                    },
                 )
-                print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: Agent 模式失败: {e}，回退为普通模式{BColors.ENDC}")
+                log_hint = f"；完整诊断: {log_path}" if log_path else ""
+                print(
+                    f"{BColors.FAIL}[LLM_Prompt_Formatter]: Agent 模式失败: "
+                    f"{error_summary}；未回退普通模式{log_hint}{BColors.ENDC}"
+                )
+                raise RuntimeError(
+                    f"Agent 模式在重试和基于已有信息收尾后仍失败: "
+                    f"{error_summary}{log_hint}"
+                ) from None
 
         # ── 普通模式 ─────────────────────────────────────────────────
         system_content, fewshot_user, fewshot_assistant, gemma_prompt, is_anima = \
