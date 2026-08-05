@@ -165,9 +165,21 @@ def split_by_language(text):
 # 用户已提供标签的确定性抽取（防止 Agent 重复检索）
 # ═══════════════════════════════════════════════════════════════════
 
-# 合法 Danbooru 标签 token：全小写 ASCII、无空格，可含下划线/括号/数字等。
+# 合法 Danbooru 标签 token：ASCII、无空格，可含下划线/括号/数字/转义符等。
 # 中文、含空格的自然语言短句（如 "depth of field"）天然不匹配，因此被排除。
-_PROVIDED_TAG_RE = re.compile(r"^[a-z0-9][a-z0-9_().:'+\-]*$")
+_PROVIDED_TAG_PATTERN = r"[a-z0-9][a-z0-9_().:'+\-\\]*"
+_PROVIDED_TAG_RE = re.compile(r"^" + _PROVIDED_TAG_PATTERN + r"$", re.IGNORECASE)
+# 支持用户常见的“角色名：tag_a, tag_b”以及“描述（tag_a, tag_b）”写法。
+# 只接受明确的冒号/括号边界，避免把“在livehouse舞台上”里的 livehouse
+# 误判成用户已经确认的标签。
+_PROVIDED_TAG_AT_END_RE = re.compile(
+    r"(?:^|[：:（\[【{])\s*(?P<tag>" + _PROVIDED_TAG_PATTERN + r")\s*$",
+    re.IGNORECASE,
+)
+_PROVIDED_TAG_AT_START_RE = re.compile(
+    r"^\s*(?P<tag>" + _PROVIDED_TAG_PATTERN + r")(?=\s*(?:[）\]】}]|$))",
+    re.IGNORECASE,
+)
 
 
 def normalize_tag(tag):
@@ -185,8 +197,9 @@ def normalize_tag(tag):
 def extract_provided_tags(text):
     """从用户原始输入中确定性地抽取已提供的 Danbooru 标签。
 
-    按逗号/顿号/换行切分，凡是「无空格的全小写 token」即视为用户已提供标签。
-    自然语言（中文、含空格的英文短句）不会被误抽。返回保序去重的标签列表。
+    按逗号/顿号/换行切分，抽取完整的无空格 ASCII tag；同时支持
+    「角色名：tag」和「描述（tag_a, tag_b）」边界写法。自然语言中的嵌入英文词
+    （如「在livehouse舞台上」）不会被误抽。返回保序去重的标签列表。
 
     不依赖查询重写 LLM，确保即使 LLM 漏标 [已有]，禁止重复检索的列表仍完整。
     """
@@ -194,13 +207,25 @@ def extract_provided_tags(text):
     seen = set()
     for chunk in re.split(r"[,\n，、]", text):
         tok = chunk.strip()
-        if not tok or len(tok) < 2 or " " in tok:
+        if not tok:
             continue
-        if _PROVIDED_TAG_RE.match(tok.lower()):
-            key = normalize_tag(tok)
+        candidates = []
+        if len(tok) >= 2 and " " not in tok and _PROVIDED_TAG_RE.fullmatch(tok):
+            candidates.append(tok)
+        else:
+            # 同一逗号片段可能同时包含上一组标签的结尾和下一组标签的开头，
+            # 例如 "white_cape）的天海春香（red_ribbon"，两端都要抽取。
+            start_match = _PROVIDED_TAG_AT_START_RE.match(tok)
+            end_match = _PROVIDED_TAG_AT_END_RE.search(tok)
+            if start_match:
+                candidates.append(start_match.group("tag"))
+            if end_match:
+                candidates.append(end_match.group("tag"))
+        for candidate in candidates:
+            key = normalize_tag(candidate)
             if key and key not in seen:
                 seen.add(key)
-                provided.append(tok)
+                provided.append(candidate)
     return provided
 
 
