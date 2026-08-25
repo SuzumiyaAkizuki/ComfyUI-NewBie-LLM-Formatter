@@ -323,7 +323,7 @@ def inject_anima_style(prompt_text, artist_tags, style_str):
 
     if has_artists:
         formatted = [format_tag_anima(c, w) for c, w in artist_tags]
-        formatted_artists = 'use the fixed style of ' + ' and '.join(formatted)
+        formatted_artists = 'use the mixed style of ' + ' and '.join(formatted)
     else:
         formatted_artists = ""
 

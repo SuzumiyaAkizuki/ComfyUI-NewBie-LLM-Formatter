@@ -1,9 +1,21 @@
 """Provider-compatible message normalization and reasoning replay helpers."""
 
+import re
 from types import SimpleNamespace
 
 
-def _sanitize_messages_for_gemini(messages):
+_GEMINI_MODEL_PATTERN = re.compile(
+    r"(?:^|[/.:])gemini(?:[-_.:]|\d|$)",
+    flags=re.IGNORECASE,
+)
+
+
+def _is_gemini_model(model_name):
+    """仅对明确的 Gemini 模型标识返回 True。"""
+    return bool(_GEMINI_MODEL_PATTERN.search(str(model_name or "").strip()))
+
+
+def _sanitize_messages_for_gemini(messages, model_name):
     """规范化消息格式以兼容 Gemini API（通过 Vercel / OpenRouter 网关时的特殊处理）。
 
     处理三类 Gemini/Vertex 严格约束（OpenAI 容忍但 Gemini 会报 400）：
@@ -25,7 +37,12 @@ def _sanitize_messages_for_gemini(messages):
        折叠进上一条 tool 消息的 content，保持响应回合纯净。
 
     返回的是消息的浅拷贝，不会修改调用方持有的原始 messages 列表。
+    只有 model_name 明确匹配 Gemini 时才做协议重写；模型名缺失、未知或
+    属于其他模型时均原样传递。
     """
+    if not _is_gemini_model(model_name):
+        return list(messages)
+
     # Pass 1：移除 assistant+tool_calls 的 content；折叠 tool 后的 user 文本
     sanitized = []
     for m in messages:
@@ -56,10 +73,15 @@ def _sanitize_messages_for_gemini(messages):
                 resp_by_id[sanitized[j].get("tool_call_id")] = sanitized[j]
                 j += 1
             # 为每个 call 生成「单调用 assistant + 其响应」一对
-            for tc in tool_calls:
+            for call_index, tc in enumerate(tool_calls):
                 single = dict(m)
                 single["tool_calls"] = [tc]
                 single.pop("content", None)
+                # 原 assistant 只有一次思考。拆分为多个合成回合时，
+                # 不能让浅拷贝把同一份 reasoning 重复写入历史。
+                if call_index > 0:
+                    for field in ("reasoning_details", "reasoning_content", "reasoning"):
+                        single.pop(field, None)
                 result.append(single)
                 resp = resp_by_id.get(tc.get("id"))
                 if resp is not None:

@@ -66,7 +66,7 @@ def get_platform_settings(api_url: str, model_name: str, thinking: bool) -> dict
         if thinking:
             extra_body = {"reasoning": {"enabled": True, "max_tokens": 8000}}
         else:
-            extra_body = {"reasoning": {"enabled": False}}
+            extra_body = {"reasoning": {"effort": "none"}}
 
     else:
         print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 思考模式开关暂不支持您使用的API平台。{BColors.ENDC}")

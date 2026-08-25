@@ -42,7 +42,9 @@ def force_final_output(agent, messages):
         resp = agent._create_completion(
             purpose="强制收尾",
             model=agent.model_name,
-            messages=_sanitize_messages_for_gemini(messages),
+            messages=_sanitize_messages_for_gemini(
+                messages, getattr(agent, "model_name", None),
+            ),
             temperature=0.7, extra_body=agent._extra_body,
         )
         content = resp.choices[0].message.content or ""
@@ -90,7 +92,9 @@ def run_agent_loop(agent, messages, max_rounds, provided_norm,
         available_tools = tools_provider()
         _log(f"LLM 请求: {len(available_tools)} tools available, {len(messages)} messages")
 
-        sanitized_messages = _sanitize_messages_for_gemini(messages)
+        sanitized_messages = _sanitize_messages_for_gemini(
+            messages, getattr(self, "model_name", None),
+        )
         request_args = {
             "model": self.model_name,
             "messages": sanitized_messages,

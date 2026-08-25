@@ -28,7 +28,10 @@ def get_output_format_section(agent):
 def fallback_normal(agent, user_text, image):
     _log_warn("回退为普通模式（无工具调用）")
     from prompt_agent.agent_prompts import get_agent_system_prompt
-    system_content, fu, fa = get_agent_system_prompt(agent.mode, agent.config)
+    system_content, fu, fa = get_agent_system_prompt(
+        agent.mode, agent.config,
+        model_name=getattr(agent, "model_name", None),
+    )
     messages = [{"role": "system", "content": system_content}]
     if fu and fa:
         messages.append({"role": "user", "content": fu})
@@ -162,7 +165,10 @@ def assemble_low_output(agent, all_tag_names, tag_cn_map, user_text, user_tags, 
     output_format = LOW_ASSEMBLY_PROMPT.format(
         output_format_section=agent._get_output_format_section(),
     )
-    _, fewshot_user, fewshot_assistant = get_agent_system_prompt(agent.mode, agent.config)
+    _, fewshot_user, fewshot_assistant = get_agent_system_prompt(
+        agent.mode, agent.config,
+        model_name=getattr(agent, "model_name", None),
+    )
 
     assembly_messages = [{"role": "system", "content": output_format}]
     if fewshot_user and fewshot_assistant:

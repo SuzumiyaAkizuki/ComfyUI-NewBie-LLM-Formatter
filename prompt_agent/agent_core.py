@@ -983,6 +983,7 @@ class PromptAgent:
 
         system_content, fewshot_user, fewshot_assistant = get_agent_system_prompt(
             self.mode, self.config, max_rounds=max_rounds,
+            model_name=getattr(self, "model_name", None),
         )
         messages = [{"role": "system", "content": system_content}]
 
@@ -1049,6 +1050,7 @@ class PromptAgent:
         max_rounds = _REVISION_MAX_ROUNDS
         system_content, _, _ = get_agent_system_prompt(
             self.mode, self.config, max_rounds=max_rounds,
+            model_name=getattr(self, "model_name", None),
         )
         # 复用上一轮已抓取、随基线保留的格式规范（不额外调 MCP），
         # 否则续写只能模仿上一轮输出，易偏离标题/结构（如 ### 中文解释、改动说明）。

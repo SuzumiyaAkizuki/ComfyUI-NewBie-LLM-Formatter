@@ -4,6 +4,8 @@ prompt_agent/agent_prompts.py
 Agent 模式专用提示词。
 """
 
+from prompt_agent.message_protocol import _is_gemini_model
+
 QUERY_REWRITE_PROMPT = """
 # Role
 Danbooru 标签检索的查询重写与扩充引擎。
@@ -385,7 +387,7 @@ def get_format_tool_directive(mode):
     )
 
 
-def get_agent_system_prompt(mode, config, max_rounds=None):
+def get_agent_system_prompt(mode, config, max_rounds=None, model_name=None):
     """
     构建 Agent 模式的完整系统提示词。
     Args:
@@ -434,7 +436,7 @@ def get_agent_system_prompt(mode, config, max_rounds=None):
     )
 
     jailbreaker = config.get("gemini_jailbreaker", "")
-    if jailbreaker:
+    if jailbreaker and _is_gemini_model(model_name):
         system_content = f"{jailbreaker}\n\n{system_content}"
 
     if artists_anima:
