@@ -157,6 +157,29 @@ _FALLBACK_TOOLS = [
 ]
 
 
+_FALLBACK_TOOLS.extend([
+    {"type": "function", "function": {
+        "name": "get_moss_image_format",
+        "description": "获取 MOSS-Image caption / Layout 草稿规范。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    }},
+    {"type": "function", "function": {
+        "name": "compile_moss_prompt",
+        "description": "编译 MOSS caption 或 Layout 对象。Layout 使用像素 abs/xyxy 坐标，编译器自动转换。",
+        "parameters": {"type": "object", "properties": {"draft": {"type": "object"}}, "required": ["draft"]},
+    }},
+    {"type": "function", "function": {
+        "name": "convert_moss_bbox",
+        "description": "单独转换像素 xyxy 框；不要将结果放回待编译草稿以免重复转换。",
+        "parameters": {"type": "object", "properties": {
+            "bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+            "width": {"type": "integer", "minimum": 16, "multipleOf": 16},
+            "height": {"type": "integer", "minimum": 16, "multipleOf": 16},
+        }, "required": ["bbox", "width", "height"]},
+    }},
+])
+
+
 _HEADERS_BASE = {
     "Content-Type": "application/json",
     "Accept":       "application/json, text/event-stream",
@@ -515,3 +538,15 @@ def execute_get_newbie_format() -> str:
     if "raw" in data:
         return data["raw"]
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def execute_moss_tool(name, arguments):
+    """保留编译器返回的原始文本（包括 Layout 的单行 JSON）。"""
+    if name not in {"get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"}:
+        raise ValueError(f"Unknown MOSS tool: {name}")
+    result = _rpc("tools/call", {"name": name, "arguments": arguments})
+    blocks = result.get("content", [])
+    text = "\n".join(b["text"] for b in blocks if b.get("type") == "text")
+    if result.get("isError") or not text.strip():
+        raise RuntimeError(f"{name}: {text or 'MCP 返回内容为空'}")
+    return text

@@ -33,6 +33,7 @@ from prompt_agent.cache import (
     get_baseline_store, compute_edit, normalize as normalize_prompt,
 )
 from prompt_agent.agent_trace import emit_agent_trace
+from prompt_agent.web_search import WEB_SEARCH_TOOL, execute_web_search
 from prompt_agent import utils
 from prompt_agent.console import (
     _C, _log, _log_warn, _log_error, _log_ok, _log_section,
@@ -119,7 +120,7 @@ _EFFORT_CONFIG = {
 
 
 class PromptAgent:
-    def __init__(self, api_key, api_url, model_name, mode, thinking, config, effort="Medium", unique_id=None):
+    def __init__(self, api_key, api_url, model_name, mode, thinking, config, effort="Medium", unique_id=None, enable_web_search=False):
         self.api_key = api_key
         self.api_url = api_url
         self.model_name = model_name
@@ -128,6 +129,9 @@ class PromptAgent:
         self.config = config
         self.effort = effort
         self.unique_id = unique_id
+        self.enable_web_search = bool(enable_web_search)
+        if self.enable_web_search and effort in ("Medium", "High") and not self.web_search_enabled:
+            _log_warn("联网搜索未启用：请在 LPF_config.json 中填写 tavily_api_key。")
         self._effort_cfg = _EFFORT_CONFIG.get(effort, _EFFORT_CONFIG["Medium"])
         self.llm = OpenAI(api_key=api_key, base_url=api_url)
         from LLM_Node import get_platform_settings
@@ -396,6 +400,12 @@ class PromptAgent:
 
     def _create_completion(self, *, purpose="LLM", **kwargs):
         """统一 LLM 调用入口：失败后按 1s/2s/4s 指数退避重试三次。"""
+        from prompt_agent.output_contract import MARKER, response_format_settings, format_rejected
+        if any(m.get("role") == "system" and MARKER in str(m.get("content", ""))
+               for m in kwargs.get("messages", [])):
+            kwargs.update(response_format_settings(
+                getattr(self, "api_url", ""), getattr(self, "model_name", ""),
+                has_tools=bool(kwargs.get("tools"))))
         log_path = None
         max_attempts = len(_COMPLETION_RETRY_DELAYS) + 1
         for attempt in range(1, max_attempts + 1):
@@ -405,6 +415,14 @@ class PromptAgent:
                 return self._create_completion_once(purpose=purpose, **kwargs)
             except Exception as error:
                 self._raise_if_interrupted(error)
+                if kwargs.get("response_format") and format_rejected(error):
+                    _log_warn("平台拒绝 JSON 参数，改用提示词 JSON 约束")
+                    kwargs.pop("response_format")
+                    try:
+                        return self._create_completion_once(purpose=purpose, **kwargs)
+                    except Exception as fallback_error:
+                        self._raise_if_interrupted(fallback_error)
+                        error = fallback_error
                 log_path = write_agent_error_log(
                     error,
                     context=self._completion_error_context(purpose, attempt),
@@ -521,7 +539,36 @@ class PromptAgent:
                     _log_warn(f"LLM 响应体: {raw[:500]}")
         return "", []
 
+    @property
+    def web_search_enabled(self):
+        key = getattr(self, "config", {}).get("tavily_api_key", "")
+        return (bool(getattr(self, "enable_web_search", False))
+                and getattr(self, "effort", None) in ("Medium", "High")
+                and isinstance(key, str) and bool(key.strip()))
+
+    def _get_available_tools(self):
+        # Copy the MCP list so one node's switch cannot affect other nodes.
+        tools = list(get_tools())
+        if self.web_search_enabled:
+            tools.append(WEB_SEARCH_TOOL)
+        return tools
+
     def _execute_tool(self, name, args):
+        if name in {"get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"}:
+            from prompt_agent.tools import execute_moss_tool
+            if name == "compile_moss_prompt":
+                self._moss_compiled_prompt = None
+            result = execute_moss_tool(name, args)
+            if name == "compile_moss_prompt":
+                self._moss_compiled_prompt = result
+            return result
+        if name == "web_search":
+            if not self.web_search_enabled:
+                return json.dumps({"error": "Web search is disabled for this run."})
+            return execute_web_search(
+                self.config.get("tavily_api_key", ""),
+                args.get("query"), args.get("max_results", 5),
+            )
         if name == "search_tags":
             # 若 LLM 未指定 search_mode / include_wiki，使用当前 effort 级别的默认值
             default_mode = self._effort_cfg.get("search_mode", "full_scene")
@@ -609,7 +656,10 @@ class PromptAgent:
             _log(f"  > 调用工具：{name}", _C.GREEN)
 
     def _log_tool_result(self, name, result_str):
-        if name in ("get_anima_format", "get_newbie_format"):
+        if name in ("get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"):
+            _log(f"    MOSS 工具返回 ({len(result_str)} chars)", _C.GREEN)
+            return
+        if name in ("get_anima_format", "get_newbie_format", "get_moss_image_format"):
             _log(f"    格式规范已获取 ({len(result_str)} chars)", _C.GREEN)
             return
         try:
@@ -625,16 +675,17 @@ class PromptAgent:
                 return
             results = data.get("results", [])
             if results:
-                _log(f"    找到 {len(results)} 个标签", _C.GREEN)
+                kind = "网页来源" if name == "web_search" else "标签"
+                _log(f"    找到 {len(results)} 个{kind}", _C.GREEN)
             elif data.get("error"):
                 _log_warn(f"    工具返回错误: {data['error']}")
             else:
-                _log("    未找到标签", _C.WARNING)
+                _log("    未找到网页来源" if name == "web_search" else "    未找到标签", _C.WARNING)
         except Exception:
             pass
 
     def _tool_trace_summary(self, name, args):
-        if name == "search_tags":
+        if name in ("search_tags", "web_search"):
             return str(args.get("query", "")).strip()
         if name == "get_related_tags":
             tags = args.get("tags", [])
@@ -648,12 +699,14 @@ class PromptAgent:
             return f"{len(tags)} tags"
         if name == "get_artist_profile":
             return str(args.get("artist_name", "")).strip()
-        if name in ("get_anima_format", "get_newbie_format"):
+        if name in ("get_anima_format", "get_newbie_format", "get_moss_image_format"):
             return "读取输出格式规范"
         return ""
 
     def _tool_result_summary(self, name, result_str):
-        if name in ("get_anima_format", "get_newbie_format"):
+        if name in ("get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"):
+            return f"{len(result_str)} chars"
+        if name in ("get_anima_format", "get_newbie_format", "get_moss_image_format"):
             return f"{len(result_str)} chars"
         try:
             data = json.loads(result_str)
@@ -672,7 +725,7 @@ class PromptAgent:
             return "artist not found"
         results = data.get("results", [])
         if isinstance(results, list) and results:
-            return f"{len(results)} tags"
+            return f"{len(results)} web sources" if name == "web_search" else f"{len(results)} tags"
         prompt = data.get("prompt")
         if isinstance(prompt, str) and prompt.strip():
             return f"{len([t for t in prompt.split(',') if t.strip()])} prompt tags"
@@ -682,6 +735,10 @@ class PromptAgent:
         try:
             data = json.loads(result_str)
         except Exception:
+            return {"text": result_str[:1200]}
+        if not isinstance(data, dict):
+            return {"text": result_str[:1200]}
+        if not isinstance(data, dict):
             return {"text": result_str[:1200]}
         compact = {}
         for key in ("prompt", "error", "skipped", "note"):
@@ -776,6 +833,7 @@ class PromptAgent:
         return force_final_output(self, messages)
 
     def run(self, user_text, image=None, force_full_run=False):
+        self._moss_compiled_prompt = None
         self._trace(
             "start",
             status="running",
@@ -919,6 +977,7 @@ class PromptAgent:
         """
         if not (baseline
                 and baseline.get("mode") == self.mode
+                and baseline.get("web_search_enabled", False) == self.web_search_enabled
                 and baseline.get("output")):
             return ("cold", None)
         if image is None:
@@ -984,6 +1043,7 @@ class PromptAgent:
         system_content, fewshot_user, fewshot_assistant = get_agent_system_prompt(
             self.mode, self.config, max_rounds=max_rounds,
             model_name=getattr(self, "model_name", None),
+            enable_web_search=self.web_search_enabled,
         )
         messages = [{"role": "system", "content": system_content}]
 
@@ -1051,21 +1111,22 @@ class PromptAgent:
         system_content, _, _ = get_agent_system_prompt(
             self.mode, self.config, max_rounds=max_rounds,
             model_name=getattr(self, "model_name", None),
+            enable_web_search=self.web_search_enabled,
         )
         # 复用上一轮已抓取、随基线保留的格式规范（不额外调 MCP），
         # 否则续写只能模仿上一轮输出，易偏离标题/结构（如 ### 中文解释、改动说明）。
         spec = baseline.get("format_spec")
         if spec:
             system_content += (
-                "\n\n# 输出格式规范（权威参考，标题与整体结构必须严格遵守）\n\n" + spec
+                "\n\n# 输出格式规范（内容结构参考；外层必须遵守 xml_out/text_out JSON 契约）\n\n" + spec
             )
-        if self.mode == "Anima":
+        if self.mode != "NewBie":
             fmt_hint = (
-                "必须保留 `## Prompt` 和 `## 中文解释` 两个标题；"
-                "`## 中文解释` 段照常写完整的中文设计说明（针对最终成品，不是改动清单）。"
+                "必须返回 xml_out/text_out JSON；"
+                "text_out 照常写完整的中文设计说明（针对最终成品，不是改动清单）。"
             )
         else:
-            fmt_hint = "保留同样的 `<img>` XML 代码块及其后的中文翻译。"
+            fmt_hint = "返回 xml_out/text_out JSON，xml_out 保存完整 `<img>` XML，text_out 保存中文翻译。"
         revise_directive = (
             "用户在上一轮提示词（见上文 user 消息）的基础上做了修改。"
             "修改后的完整提示词如下：\n"
@@ -1102,6 +1163,7 @@ class PromptAgent:
                 "output": content,
                 "mode": self.mode,
                 "has_image": image is not None,
+                "web_search_enabled": self.web_search_enabled,
                 "image_fingerprint": utils.image_fingerprint(image) if image is not None else None,
                 "format_spec": format_spec,
                 "continuation_count": int(continuation_count or 0),
@@ -1113,7 +1175,7 @@ class PromptAgent:
         return run_agent_loop(
             self, messages, max_rounds, provided_norm,
             error_writer=write_agent_error_log,
-            tools_provider=get_tools,
+            tools_provider=self._get_available_tools,
         )
 
     def _parse_output(self, content):

@@ -2,6 +2,8 @@
 
 import json
 
+from prompt_agent.output_contract import output_instruction
+from prompt_agent.agent_loop import complete_moss_output
 from prompt_agent import utils
 from prompt_agent.agent_prompts import LOW_ASSEMBLY_PROMPT
 from prompt_agent.console import (
@@ -19,10 +21,12 @@ except ImportError:
 
 
 def get_output_format_section(agent):
-    from prompt_agent.agent_prompts import _NEWBIE_OUTPUT_FORMAT, _ANIMA_OUTPUT_FORMAT
+    from prompt_agent.agent_prompts import _NEWBIE_OUTPUT_FORMAT, _ANIMA_OUTPUT_FORMAT, _MOSS_OUTPUT_FORMAT
+    if agent.mode == "MOSS":
+        return _MOSS_OUTPUT_FORMAT + "\n\n" + output_instruction(agent.mode)
     if agent.mode == "Anima":
-        return _ANIMA_OUTPUT_FORMAT
-    return _NEWBIE_OUTPUT_FORMAT
+        return _ANIMA_OUTPUT_FORMAT + "\n\n" + output_instruction(agent.mode)
+    return _NEWBIE_OUTPUT_FORMAT + "\n\n" + output_instruction(agent.mode)
 
 
 def fallback_normal(agent, user_text, image):
@@ -46,12 +50,15 @@ def fallback_normal(agent, user_text, image):
     else:
         messages.append({"role": "user", "content": user_content})
     try:
-        resp = agent._create_completion(
-            purpose="回退生成",
-            model=agent.model_name, messages=messages,
-            temperature=0.7, extra_body=agent._extra_body,
-        )
-        content = resp.choices[0].message.content or ""
+        if agent.mode == "MOSS":
+            content = complete_moss_output(agent, messages)
+        else:
+            resp = agent._create_completion(
+                purpose="回退生成",
+                model=agent.model_name, messages=messages,
+                temperature=0.7, extra_body=agent._extra_body,
+            )
+            content = resp.choices[0].message.content or ""
     except Exception as e:
         _log_error(f"回退模式 LLM 调用失败: {format_agent_error_summary(e)}")
         raise
@@ -192,14 +199,17 @@ def assemble_low_output(agent, all_tag_names, tag_cn_map, user_text, user_tags, 
         assembly_messages.append({"role": "user", "content": user_content})
 
     try:
-        resp = agent._create_completion(
-            purpose="最终提示词组装",
-            model=agent.model_name, messages=assembly_messages,
-            temperature=0.7, extra_body=agent._extra_body,
-        )
-        content = resp.choices[0].message.content or ""
-        if resp.usage:
-            agent._log_token_usage(resp.usage)
+        if agent.mode == "MOSS":
+            content = complete_moss_output(agent, assembly_messages)
+        else:
+            resp = agent._create_completion(
+                purpose="最终提示词组装",
+                model=agent.model_name, messages=assembly_messages,
+                temperature=0.7, extra_body=agent._extra_body,
+            )
+            content = resp.choices[0].message.content or ""
+            if resp.usage:
+                agent._log_token_usage(resp.usage)
     except Exception as e:
         _log_error(f"组装阶段 LLM 调用失败: {format_agent_error_summary(e)}")
         raise
@@ -266,10 +276,10 @@ def run_low_continuation(agent, user_text, baseline, edit):
     seen = set()
     candidate_tags = [t for t in candidate_tags if not (t in seen or seen.add(t))]
 
-    if agent.mode == "Anima":
-        fmt_hint = "必须保留 `## Prompt` 和 `## 中文解释` 两个标题；`## 中文解释` 写完整设计说明。"
+    if agent.mode != "NewBie":
+        fmt_hint = "必须返回 xml_out/text_out JSON，text_out 写完整设计说明。"
     else:
-        fmt_hint = "保留同样的 `<img>` XML 代码块及其后的中文翻译。"
+        fmt_hint = "返回 xml_out/text_out JSON，xml_out 保存完整 `<img>` XML，text_out 保存中文翻译。"
     revise_directive = (
         "用户在上一轮提示词（见上文 user 消息）的基础上做了修改。"
         "修改后的完整提示词如下：\n"
@@ -295,14 +305,17 @@ def run_low_continuation(agent, user_text, baseline, edit):
         {"role": "user", "content": revise_directive},
     ]
     try:
-        resp = agent._create_completion(
-            purpose="增量修订",
-            model=agent.model_name, messages=messages,
-            temperature=0.7, extra_body=agent._extra_body,
-        )
-        content = resp.choices[0].message.content or ""
-        if resp.usage:
-            agent._log_token_usage(resp.usage)
+        if agent.mode == "MOSS":
+            content = complete_moss_output(agent, messages)
+        else:
+            resp = agent._create_completion(
+                purpose="增量修订",
+                model=agent.model_name, messages=messages,
+                temperature=0.7, extra_body=agent._extra_body,
+            )
+            content = resp.choices[0].message.content or ""
+            if resp.usage:
+                agent._log_token_usage(resp.usage)
     except Exception as e:
         _log_error(f"Low 修订 LLM 调用失败: {format_agent_error_summary(e)}")
         raise

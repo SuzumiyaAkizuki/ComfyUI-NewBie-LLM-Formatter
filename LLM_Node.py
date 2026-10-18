@@ -9,6 +9,7 @@ from prompt_agent.agent_core import (
 )
 from prompt_agent.agent_trace import emit_agent_trace
 from prompt_agent import utils
+from prompt_agent.output_contract import output_instruction, normalize_fewshot, response_format_settings, format_rejected
 import comfy.utils
 import comfy.model_management
 
@@ -134,12 +135,13 @@ class LLM_Prompt_Formatter:
                 "user_text": ("STRING",
                               {"multiline": True, "default": default_user_text, "dynamicPrompts": False}),
                 "thinking": ("BOOLEAN", {"default": False}),
-                "mode": (["NewBie", "Anima"],),
+                "mode": (["NewBie", "Anima", "MOSS"],),
                 "agent_effort": (["Close", "Low", "Medium", "High"],),
                 "force_full_agent_run": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "image": ("IMAGE",),
+                "enable_web_search": ("BOOLEAN", {"default": False, "tooltip": "启用 Tavily 联网搜索，仅 Medium/High 生效；请先在 LPF_config.json 填写 tavily_api_key。"}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -196,7 +198,13 @@ class LLM_Prompt_Formatter:
         Returns (system_content, fewshot_user, fewshot_assistant, gemma_prompt, is_anima).
         """
         is_anima = (mode == "Anima")
-        if is_anima:
+        if mode == "MOSS":
+            from prompt_agent.agent_prompts import _MOSS_OUTPUT_FORMAT
+            system_content = config.get("system_prompt_moss") or _MOSS_OUTPUT_FORMAT
+            fewshot_user = config.get("fewshot_user_moss", "")
+            fewshot_assistant = config.get("fewshot_assistant_moss", "")
+            print("[LLM_Prompt_Formatter]: 当前模式: MOSS")
+        elif is_anima:
             system_content = config.get("system_prompt_anima", "You are a helpful assistant that generates image prompts.")
             fewshot_user = config.get("fewshot_user_anima", "")
             fewshot_assistant = config.get("fewshot_assistant_anima", "")
@@ -217,6 +225,8 @@ class LLM_Prompt_Formatter:
             print(f"[LLM_Prompt_Formatter]: 已启用Gemini强力破甲。")
             system_content = f"{jailbreaker}{system_content}"
 
+        system_content += "\n\n" + output_instruction(mode)
+        fewshot_assistant = normalize_fewshot(fewshot_assistant, mode)
         return system_content, fewshot_user, fewshot_assistant, gemma_prompt, is_anima
 
     @staticmethod
@@ -279,33 +289,14 @@ class LLM_Prompt_Formatter:
         return full_response, reasoning
 
     @staticmethod
-    def _parse_normal_output(full_response, is_anima, gemma_prompt):
-        """解析普通模式的 LLM 输出。
-        Anima: 中英文分离。NewBie: 三级 XML 提取策略。
-        """
-        if is_anima:
-            xml_content, text_content = utils.split_by_language(full_response)
-            xml_content = utils.strip_code_fences(xml_content)
-            if not xml_content:
-                print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: Anima模式未检测到英文内容，返回完整响应。{BColors.ENDC}")
-                xml_content = full_response
-            return xml_content, text_content
-
-        # NewBie mode: 严格错误处理
-        if "```" not in full_response and "<img>" not in full_response:
-            print(f"{BColors.FAIL}[LLM_Prompt_Formatter]: 大模型的回复中未检测到<img>标签。以下是大模型的回复：\n {full_response} {BColors.ENDC}")
-            raise ValueError("LLM API 的回复中未检测到<img>标签。")
-        if "```" not in full_response and "<img>" in full_response and "</img>" not in full_response:
-            print(f"{BColors.WARNING}[LLM_Prompt_Formatter]: 大模型的回复可能被截断。以下是大模型的回复：\n {full_response} {BColors.ENDC}")
-            raise ValueError("LLM API 的回复可能被截断。")
-
-        xml_content, text_content = utils.parse_newbie_content(full_response)
-        xml_content = utils.clean_prompt(xml_content, gemma_prompt)
-        return xml_content, text_content
+    def _parse_normal_output(full_response, is_anima, gemma_prompt, mode=None):
+        from prompt_agent.output_parser import parse_output
+        return parse_output(mode or ("Anima" if is_anima else "NewBie"), full_response,
+                            {"gemma_prompt": gemma_prompt})
 
     # ── 主方法 ─────────────────────────────────────────────────────────
 
-    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, force_full_agent_run=False, image=None, unique_id=None):
+    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, force_full_agent_run=False, image=None, unique_id=None, enable_web_search=False):
         config = load_api_config()
         final_key, final_url = self._resolve_credentials(config, api_key, api_url)
 
@@ -317,6 +308,7 @@ class LLM_Prompt_Formatter:
                     api_key=final_key, api_url=final_url, model_name=model_name,
                     mode=mode, thinking=thinking, config=config, effort=agent_effort,
                     unique_id=unique_id,
+                    enable_web_search=enable_web_search,
                 )
                 return agent.run(user_text, image=image, force_full_run=force_full_agent_run)
             except comfy.model_management.InterruptProcessingException:
@@ -371,7 +363,15 @@ class LLM_Prompt_Formatter:
                 system_content, fewshot_user, fewshot_assistant, user_text, image
             )
 
+            if mode == "MOSS":
+                from prompt_agent.agent_loop import complete_moss_output
+                agent = PromptAgent(final_key, final_url, model_name, mode, thinking,
+                                    config, effort="Close", unique_id=unique_id)
+                content = complete_moss_output(agent, messages_list)
+                return self._parse_normal_output(content, is_anima, gemma_prompt, mode=mode)
+
             extra_body = self.get_platform_settings(final_url, model_name, thinking)
+            output_settings = response_format_settings(final_url, model_name)
             max_retries = 3
             pbar = comfy.utils.ProgressBar(max_retries + 1, node_id=unique_id)
 
@@ -381,7 +381,7 @@ class LLM_Prompt_Formatter:
                 try:
                     response = client.chat.completions.create(
                         model=model_name, messages=messages_list,
-                        temperature=0.7, extra_body=extra_body,
+                        temperature=0.7, extra_body=extra_body, **output_settings,
                     )
                     usage = response.usage
                     print(f"[LLM_Prompt_Formatter]: Tokens: {usage.prompt_tokens} input + {usage.completion_tokens} output = {usage.total_tokens} used.")
@@ -402,11 +402,14 @@ class LLM_Prompt_Formatter:
                     full_response, _reasoning = self._extract_reasoning(response, full_response, thinking)
 
                     # 解析输出
-                    return self._parse_normal_output(full_response, is_anima, gemma_prompt)
+                    return self._parse_normal_output(full_response, is_anima, gemma_prompt, mode=mode)
 
                 except comfy.model_management.InterruptProcessingException:
                     raise
                 except Exception as inner_e:
+                    if output_settings and format_rejected(inner_e):
+                        print("[LLM_Prompt_Formatter]: 平台拒绝 JSON 参数，改用提示词 JSON 约束。")
+                        output_settings = {}
                     err_msg = str(inner_e).lower()
                     if any(kw in err_msg for kw in ["api key", "authentication", "401", "unauthorized"]):
                         raise inner_e

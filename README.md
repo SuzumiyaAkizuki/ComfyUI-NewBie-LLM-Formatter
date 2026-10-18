@@ -8,6 +8,8 @@
 
 利用大语言模型 API 将自然语言或图片自动转化为适用于 NewBie 模型的结构化 XML 提示词，或适用于 Anima 等其他模型的纯文本提示词。
 
+现支持在 `mode` 中选择 **MOSS**，支持 Danbooru 标签与自然语言，复用现有普通模式、Low 流程、Agent 循环及增量缓存。`xml_out` 输出可直接使用的 MOSS 提示词，`text_out` 输出中文说明；详细行为见 [MOSS 使用说明](MOSS.md)。
+
 ---
 
 <details open>
@@ -133,6 +135,7 @@ comfy node install NewBie-LLM-Formatter
 |------|------|------|
 | `api_key` | `string` | LLM 的 API Key。**强烈建议在此处填写，而非在节点 UI 中输入**，否则 API Key 会随工作流原图泄露。 |
 | `api_url` | `string` | API 服务的主机地址，例如 `https://openrouter.ai/api/v1`。 |
+| `tavily_api_key` | `string` | Tavily 联网搜索 API Key，默认为空。填写后，在节点打开 `enable_web_search`，并选择 `Medium` 或 `High`。 |
 | `model_list` | `array` | 可用模型名称列表，将显示在节点的下拉框中。 |
 | `system_prompt` | `string` | **NewBie 模式**发送给 LLM 的系统提示词，内置了基本的格式化指令和破限命令。可自行修改以调整 LLM 的行为。 |
 | `gemini_jailbreaker` | `string` | 针对非 Gemini 官方平台的 Gemini 模型的增强提示词，会拼接在 `system_prompt` 之前。仅在使用非官方 Gemini API 中转时生效。 |
@@ -207,6 +210,7 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | `thinking` | BOOLEAN | 深度思考模式开关。普通模式和 Agent 模式均生效。`true` 时 Agent 会流式读取并在控制台实时显示模型返回的 `reasoning_content` / `reasoning` / `reasoning_details`，工具调用轮次会原样回传推理字段；这些内容不会混入节点输出。思考模式通常更慢且消耗更多 Token。 |
 | `agent_effort` | 下拉框 | **[v1.2.9 新增]** Agent 努力等级。`Close`（默认）= 关闭 Agent，走普通模式；`Low` = 流水线模式（单轮批量搜索 + LLM 组装，不走 Agent 循环，最快）；`Medium` = Agent 循环模式（`full_scene` 预设，平衡召回质量与收敛速度，最多 8 轮）；`High` = Agent 循环模式（`concept_explore` 宽召回预设 + 默认携带 wiki 释义，最多 10 轮，最深入）。 |
 | `force_full_agent_run` | BOOLEAN | 强制本次 Agent 从头生成，不复用上一轮结果。通常保持关闭；当你觉得上一轮缓存影响了本次修改时，再临时打开。 |
+| `enable_web_search` | BOOLEAN（可选） | Tavily 联网搜索开关，默认关闭，仅 `Medium` / `High` 生效。启用且已配置 `tavily_api_key` 时，Agent 可按需搜索角色、作品和服装等参考资料，并自动注入联网搜索规则；关闭或缺少 Key 时不提供该工具和规则。切换有效启用状态后会重新生成。 |
 | `user_text` | STRING | 待转换的自然语言描述或标签集。 |
 
 **输出参数：**

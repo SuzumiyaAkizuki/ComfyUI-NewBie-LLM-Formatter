@@ -30,8 +30,93 @@ _LOW_NOVELTY_RATIO = 0.34
 _PROVIDED_TOPK = 3
 
 
+def complete_moss_output(agent, messages, content=None):
+    """Use the shared tool protocol for final compilation, without tag exploration."""
+    from prompt_agent.output_contract import parse_envelope
+    messages = list(messages)
+    failures = []
+    response = None
+    request_args = None
+
+    def deliver(raw):
+        _, explanation = parse_envelope(raw)
+        compiled = getattr(agent, "_moss_compiled_prompt", None)
+        if not isinstance(compiled, str) or not compiled.strip():
+            raise ValueError("尚未成功调用 compile_moss_prompt")
+        return json.dumps({"xml_out": compiled, "text_out": explanation}, ensure_ascii=False)
+
+    if content is not None:
+        try:
+            return deliver(content)
+        except ValueError:
+            pass
+        messages.append({"role": "assistant", "content": content})
+    messages.append({"role": "user", "content":
+        "最后必须调用 compile_moss_prompt 编译本次完整草稿（caption 也必须编译）。"
+        "保留 Danbooru 标签和用户要求；如缺少规范，先调用 get_moss_image_format。"
+        "得到成功结果后输出 xml_out/text_out JSON，xml_out 必须逐字等于最近的成功编译结果。"
+        "禁止直接输出未编译草稿或自行修改编译结果；本阶段不要重新搜索标签。"})
+    available = [t for t in agent._get_available_tools() if t["function"]["name"] in {
+        "get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"}]
+    if "compile_moss_prompt" not in {t["function"]["name"] for t in available}:
+        raise RuntimeError("MOSS 缺少 compile_moss_prompt 工具，无法交付最终提示词")
+    for _ in range(6):
+        if _COMFY_AVAILABLE:
+            comfy.model_management.throw_exception_if_processing_interrupted()
+        compiled = getattr(agent, "_moss_compiled_prompt", None)
+        request_args = dict(model=agent.model_name,
+            messages=_sanitize_messages_for_gemini(messages, getattr(agent, "model_name", None)),
+            temperature=0.7, extra_body=agent._extra_body)
+        if not compiled:
+            # After a premature final answer, require the missing compiler call.
+            choice = {"type": "function", "function": {"name": "compile_moss_prompt"}} if failures else "auto"
+            request_args.update(tools=available, tool_choice=choice)
+        response = agent._create_completion(purpose="MOSS 最终编译", **request_args)
+        msg = response.choices[0].message
+        if response.usage:
+            agent._moss_final_tokens = getattr(agent, "_moss_final_tokens", 0) + response.usage.total_tokens
+            agent._log_token_usage(response.usage)
+        calls = _serialize_tool_calls(getattr(msg, "tool_calls", None))
+        content = msg.content or ""
+        if calls:
+            messages.append(_assistant_tool_message(content, calls, msg))
+            for call in calls:
+                name = call["function"]["name"]
+                try:
+                    if name not in {t["function"]["name"] for t in available}:
+                        raise ValueError("最终编译阶段不允许该工具")
+                    args = json.loads(call["function"]["arguments"] or "{}")
+                    agent._log_tool_call(name, args)
+                    result = agent._execute_tool(name, args)
+                    agent._log_tool_result(name, result)
+                except Exception as error:
+                    agent._raise_if_interrupted(error)
+                    failures.append({"tool": name, "error": str(error)})
+                    _log_warn(f"MOSS 编译工具失败: {format_agent_error_summary(error)}")
+                    result = json.dumps({"error": str(error)}, ensure_ascii=False)
+                messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+            continue
+        try:
+            return deliver(content)
+        except ValueError as error:
+            failures.append({"stage": "final_output", "error": str(error)})
+            _log_warn(f"MOSS 最终输出尚不可交付: {error}")
+        messages.extend([{"role": "assistant", "content": content}, {"role": "user", "content":
+            "最终回答无效：请先成功编译本次草稿，再把工具返回值原样放入 xml_out，中文解释放入 text_out。"}])
+    error = ValueError("MOSS 最终编译/JSON 输出失败: " + (str(failures[-1]) if failures else "未返回最终 JSON"))
+    _default_error_writer(error,
+        context={"purpose": "MOSS finalization", "model": getattr(agent, "model_name", None),
+                 "mode": "MOSS", "failures": failures},
+        completion_args=request_args, completion_response=_plain_data(response))
+    raise error
+
+
 def force_final_output(agent, messages):
     """要求模型基于已收集标签直接输出，禁止再调工具。"""
+    if getattr(agent, "mode", None) == "MOSS":
+        before = getattr(agent, "_moss_final_tokens", 0)
+        content = complete_moss_output(agent, messages)
+        return content, getattr(agent, "_moss_final_tokens", 0) - before
     if _COMFY_AVAILABLE:
         comfy.model_management.throw_exception_if_processing_interrupted()
     messages.append({
@@ -267,7 +352,7 @@ def run_agent_loop(agent, messages, max_rounds, provided_norm,
                     details=result_details,
                 )
                 tag_cn_map.update(self._collect_cn_from_result(result))
-                if name in ("get_anima_format", "get_newbie_format"):
+                if name in ("get_anima_format", "get_newbie_format", "get_moss_image_format"):
                     captured_format = result
                 if name in ("search_tags", "get_related_tags"):
                     returned_list = self._extract_tag_list(result)
@@ -353,4 +438,8 @@ def run_agent_loop(agent, messages, max_rounds, provided_norm,
         content, forced_tokens = self._force_final_output(messages)
         total_tokens += forced_tokens
 
+    if getattr(self, "mode", None) == "MOSS":
+        before = getattr(self, "_moss_final_tokens", 0)
+        content = complete_moss_output(self, messages, content)
+        total_tokens += getattr(self, "_moss_final_tokens", 0) - before
     return content, rounds, total_tokens, captured_format
