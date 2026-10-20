@@ -1,12 +1,12 @@
 # ComfyUI-NewBie-LLM-Formatter
 
-[![ComfyUI](https://img.shields.io/badge/ComfyUI-Compatible-green.svg)](https://comfy.org/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![NewBie](https://img.shields.io/badge/NewBie-Compatible-yellow.svg)](https://huggingface.co/NewBie-AI/NewBie-image-Exp0.1)
+[![ComfyUI](readme_image/badge-ComfyUI-Compatible-green.svg)](https://comfy.org/)
+[![License](readme_image/badge-License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![NewBie](readme_image/badge-NewBie-Compatible-yellow.svg)](https://huggingface.co/NewBie-AI/NewBie-image-Exp0.1)
 
 
 
-![moss-20261020_00008_](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202610201219238.png)
+![moss-20261020_00008_](readme_image/202610201219238.png)
 
 利用大语言模型 API，将自然语言、Danbooru 标签或图片转化为适用于 **NewBie、Anima 和 MOSS** 的提示词。NewBie 输出结构化 XML，Anima 输出标签与英文自然语言，MOSS 支持普通描述（caption）和空间布局（Layout）。
 
@@ -83,10 +83,10 @@
 
 |                            Prompt                            |            使用模型             |                             结果                             |
 | :----------------------------------------------------------: | :-----------------------------: | :----------------------------------------------------------: |
-|                  天海春香和菊地真在一起演出                  | deepseek-v4-pro/anima-base-1.0  | ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202606132052480.png) |
-| 为我生成一个不良少女、辣妹的完整图像。要求如下：1. 必须含有皮项圈、露指手套、腰间系着夹克、高马尾这四个元素 2. 画面必须完整，有动作、背景等。动作要有动感。3. 画面以人物为主体，头胸部特写。其它特征自由发挥。 | deepseek-v4-pro/anima-base-1.0  | ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202606132055129.png) |
-|                        （见下文[1]）                         |   deepseek-v4-pro/Newbie 0.1    | ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202606132105429.png) |
-| 《向山进发》中的雪村葵和《摇曳露营》中的志摩凛一起在富士山脚下露营。 | gemini-3.5-flash/anima-base-1.0 | ![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202606132122284.png) |
+|                  天海春香和菊地真在一起演出                  | deepseek-v4-pro/anima-base-1.0  | ![](readme_image/202606132052480.png) |
+| 为我生成一个不良少女、辣妹的完整图像。要求如下：1. 必须含有皮项圈、露指手套、腰间系着夹克、高马尾这四个元素 2. 画面必须完整，有动作、背景等。动作要有动感。3. 画面以人物为主体，头胸部特写。其它特征自由发挥。 | deepseek-v4-pro/anima-base-1.0  | ![](readme_image/202606132055129.png) |
+|                        （见下文[1]）                         |   deepseek-v4-pro/Newbie 0.1    | ![](readme_image/202606132105429.png) |
+| 《向山进发》中的雪村葵和《摇曳露营》中的志摩凛一起在富士山脚下露营。 | gemini-3.5-flash/anima-base-1.0 | ![](readme_image/202606132122284.png) |
 
 
 
@@ -108,23 +108,23 @@ comfy node install NewBie-LLM-Formatter
 
 1. 点击 GitHub 页面中绿色按钮 `<> Code`，点击 **Download ZIP**，下载压缩包。
 
-   ![下载按钮](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211546384.png)
+   ![下载按钮](readme_image/202512211546384.png)
 
-   ![压缩包](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512211548632.png)
+   ![压缩包](readme_image/202512211548632.png)
 
 2. 将解压后的文件夹放置在 `...\ComfyUI\custom_nodes\` 目录下。
 
-   ![image-20251226145335813](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261453308.png)
+   ![image-20251226145335813](readme_image/202512261453308.png)
 
 3. 进入文件夹，将 `LPF_config.json.example` **复制一份**并命名为 `LPF_config.json`。已有配置的用户请保留原文件，按需补充新字段，避免覆盖 API Key 和自定义风格。
 
-   ![重命名前](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261454909.png)
+   ![重命名前](readme_image/202512261454909.png)
 
-   ![image-20251226145521692](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261455772.png)
+   ![image-20251226145521692](readme_image/202512261455772.png)
 
 4. 使用记事本或文本编辑器打开 `LPF_config.json`，按照下方[配置文件说明](#配置文件说明)填写对应字段。
 
-   ![填写前后对比](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261457930.png)
+   ![填写前后对比](readme_image/202512261457930.png)
 
 5. 重启 ComfyUI，即可使用。
 
