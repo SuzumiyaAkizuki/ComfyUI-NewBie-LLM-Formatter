@@ -3,6 +3,7 @@
 import json
 
 from prompt_agent.output_contract import output_instruction
+from prompt_agent.prompt_formats import get_format_spec, get_system_additions
 from prompt_agent.agent_loop import complete_moss_output
 from prompt_agent import utils
 from prompt_agent.agent_prompts import LOW_ASSEMBLY_PROMPT
@@ -21,12 +22,12 @@ except ImportError:
 
 
 def get_output_format_section(agent):
-    from prompt_agent.agent_prompts import _NEWBIE_OUTPUT_FORMAT, _ANIMA_OUTPUT_FORMAT, _MOSS_OUTPUT_FORMAT
-    if agent.mode == "MOSS":
-        return _MOSS_OUTPUT_FORMAT + "\n\n" + output_instruction(agent.mode)
-    if agent.mode == "Anima":
-        return _ANIMA_OUTPUT_FORMAT + "\n\n" + output_instruction(agent.mode)
-    return _NEWBIE_OUTPUT_FORMAT + "\n\n" + output_instruction(agent.mode)
+    sections = [get_format_spec(agent.mode)]
+    additions = get_system_additions(agent.mode, getattr(agent, "config", {}))
+    if additions:
+        sections.append(additions)
+    sections.append(output_instruction(agent.mode))
+    return "\n\n".join(sections)
 
 
 def fallback_normal(agent, user_text, image):

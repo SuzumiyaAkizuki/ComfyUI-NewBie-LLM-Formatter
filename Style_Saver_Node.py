@@ -19,6 +19,8 @@ def normalize_style_mode(value):
         return "NewBie"
     if mode == "anima":
         return "Anima"
+    if mode == "moss":
+        return "MOSS"
     return "Both"
 
 
@@ -42,6 +44,9 @@ class LLM_Style_Saver:
                 "save_trigger": ("BOOLEAN",
                                  {"default": False, "label_on": "Save as Styles", "label_off": "Do Not Save"}),
             },
+            "optional": {
+                "mode": (["Auto", "NewBie", "Anima", "MOSS", "Both"],),
+            },
         }
 
     RETURN_TYPES = ("STRING",)
@@ -50,7 +55,7 @@ class LLM_Style_Saver:
     CATEGORY = "NewBie LLM Formatter"
     OUTPUT_NODE = True
 
-    def save_preset_logic(self, text_input, preset_name, save_trigger):
+    def save_preset_logic(self, text_input, preset_name, save_trigger, mode="Auto"):
         # 提取
         mode_pattern = r"<mode>(.*?)</mode>"
         artist_pattern = r"<(?:artist|artists)>(.*?)</(?:artist|artists)>"
@@ -59,9 +64,24 @@ class LLM_Style_Saver:
         raw_mode = extract_first_tag(text_input, mode_pattern)
         final_mode = normalize_style_mode(raw_mode)
         has_mode = bool(raw_mode)
+        moss_artist_pattern = r"<\|artist\|>(.*?)<\|/artist\|>"
+        moss_style_pattern = r"<\|style\|>(.*?)<\|/style\|>"
+        has_moss = bool(re.search(moss_artist_pattern, text_input, re.IGNORECASE | re.DOTALL)
+                        or re.search(moss_style_pattern, text_input, re.IGNORECASE | re.DOTALL))
+        if mode != "Auto":
+            final_mode = normalize_style_mode(mode)
+            has_mode = True
+        elif has_moss and not has_mode:
+            final_mode = "MOSS"
+            has_mode = True
 
-        all_artists = [html.unescape(v) for v in re.findall(artist_pattern, text_input, re.IGNORECASE | re.DOTALL)]
-        all_styles = [html.unescape(v) for v in re.findall(style_pattern, text_input, re.IGNORECASE | re.DOTALL)]
+        if final_mode == "MOSS" and has_moss:
+            artist_pattern = moss_artist_pattern
+            style_pattern = moss_style_pattern
+
+        decode = (lambda value: value) if final_mode == "MOSS" and has_moss else html.unescape
+        all_artists = [decode(v) for v in re.findall(artist_pattern, text_input, re.IGNORECASE | re.DOTALL)]
+        all_styles = [decode(v) for v in re.findall(style_pattern, text_input, re.IGNORECASE | re.DOTALL)]
 
         # 清洗 Artist
         clean_artists = []
@@ -77,9 +97,15 @@ class LLM_Style_Saver:
             clean_styles.extend(tags)
         final_style_str = ", ".join(list(dict.fromkeys(clean_styles)))
 
+        if final_mode == "MOSS":
+            final_artist_str = ", ".join(v.strip() for v in all_artists if v.strip())
+            final_style_str = ", ".join(v.strip() for v in all_styles if v.strip())
+
         # 拼装输出字符串
+        output_artist = html.escape(final_artist_str, quote=False) if final_mode == "MOSS" else final_artist_str
+        output_style = html.escape(final_style_str, quote=False) if final_mode == "MOSS" else final_style_str
         if has_mode:
-            extracted_output = f"<mode>{final_mode}</mode>\n<artist>{final_artist_str}</artist>\n<style>{final_style_str}</style>"
+            extracted_output = f"<mode>{final_mode}</mode>\n<artist>{output_artist}</artist>\n<style>{output_style}</style>"
         else:
             extracted_output = f"<artist>{final_artist_str}</artist>\n<style>{final_style_str}</style>"
 

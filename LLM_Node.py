@@ -9,6 +9,7 @@ from prompt_agent.agent_core import (
 )
 from prompt_agent.agent_trace import emit_agent_trace
 from prompt_agent import utils
+from prompt_agent.prompt_formats import get_format_spec, get_system_additions
 from prompt_agent.output_contract import output_instruction, normalize_fewshot, response_format_settings, format_rejected
 import comfy.utils
 import comfy.model_management
@@ -198,21 +199,18 @@ class LLM_Prompt_Formatter:
         Returns (system_content, fewshot_user, fewshot_assistant, gemma_prompt, is_anima).
         """
         is_anima = (mode == "Anima")
+        system_content = get_format_spec(mode)
         if mode == "MOSS":
-            from prompt_agent.agent_prompts import _MOSS_OUTPUT_FORMAT
-            system_content = config.get("system_prompt_moss") or _MOSS_OUTPUT_FORMAT
             fewshot_user = config.get("fewshot_user_moss", "")
             fewshot_assistant = config.get("fewshot_assistant_moss", "")
             print("[LLM_Prompt_Formatter]: 当前模式: MOSS")
         elif is_anima:
-            system_content = config.get("system_prompt_anima", "You are a helpful assistant that generates image prompts.")
             fewshot_user = config.get("fewshot_user_anima", "")
             fewshot_assistant = config.get("fewshot_assistant_anima", "")
             artists_anima = config.get("artists_anima", "")
             system_content = f"{system_content}{artists_anima}"
             print(f"[LLM_Prompt_Formatter]: 当前模式: Anima")
         else:
-            system_content = config.get("system_prompt", "You are a helpful assistant that provides prompt tags.")
             fewshot_user = config.get("fewshot_user", "")
             fewshot_assistant = config.get("fewshot_assistant", "")
             print(f"[LLM_Prompt_Formatter]: 当前模式: NewBie")
@@ -225,6 +223,9 @@ class LLM_Prompt_Formatter:
             print(f"[LLM_Prompt_Formatter]: 已启用Gemini强力破甲。")
             system_content = f"{jailbreaker}{system_content}"
 
+        additions = get_system_additions(mode, config)
+        if additions:
+            system_content += "\n\n" + additions
         system_content += "\n\n" + output_instruction(mode)
         fewshot_assistant = normalize_fewshot(fewshot_assistant, mode)
         return system_content, fewshot_user, fewshot_assistant, gemma_prompt, is_anima

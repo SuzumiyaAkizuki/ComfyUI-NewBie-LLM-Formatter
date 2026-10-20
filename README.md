@@ -4,11 +4,13 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![NewBie](https://img.shields.io/badge/NewBie-Compatible-yellow.svg)](https://huggingface.co/NewBie-AI/NewBie-image-Exp0.1)
 
-![](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202602100940021.png)
 
-利用大语言模型 API 将自然语言或图片自动转化为适用于 NewBie 模型的结构化 XML 提示词，或适用于 Anima 等其他模型的纯文本提示词。
 
-现支持在 `mode` 中选择 **MOSS**，支持 Danbooru 标签与自然语言，复用现有普通模式、Low 流程、Agent 循环及增量缓存。`xml_out` 输出可直接使用的 MOSS 提示词，`text_out` 输出中文说明；详细行为见 [MOSS 使用说明](MOSS.md)。
+![moss-20261020_00008_](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202610201219238.png)
+
+利用大语言模型 API，将自然语言、Danbooru 标签或图片转化为适用于 **NewBie、Anima 和 MOSS** 的提示词。NewBie 输出结构化 XML，Anima 输出标签与英文自然语言，MOSS 支持普通描述（caption）和空间布局（Layout）。
+
+在节点的 `mode` 中选择目标模型即可使用。三个模式均支持图片反推、Agent 标签搜索和增量修订；生成的提示词从 `xml_out` 输出，中文说明与翻译从 `text_out` 输出。
 
 ---
 
@@ -21,7 +23,7 @@
 
 - **自动搜索标签**：根据你的描述，自动在 Danbooru 标签库中搜索匹配的发型、服装、表情、场景等标签。
 - **关联扩展**：从搜索结果出发，沿标签共现图谱自动发现你可能没想到的补充标签。
-- **智能组装**：将搜索到的标签按规范格式整理输出（NewBie 模式为 XML，Anima 模式为 `## Prompt` + `## 中文解释`）。
+- **智能组装**：将搜索到的标签按规范格式整理输出（NewBie 为 XML，Anima 为标签与英文自然语言，MOSS 为 caption 或 Layout）。
 - **尊重已有标签**：如果你已经在输入中提供了标签，Agent 会直接信任并使用，不会重复搜索。
 
 ### 使用方法
@@ -30,8 +32,8 @@
 
 | 等级 | 说明 | 适用场景 |
 |------|------|---------|
-| **Close** | 关闭 Agent，走传统单轮 LLM 调用 | 已有完整标签、追求速度 |
-| **Low** | 流水线模式：一次批量搜索 + LLM 直接组装1 轮完成 | 追求最快速度，场景不复杂 |
+| **Close** | 关闭标签搜索，直接生成提示词（MOSS 仍需格式与编译工具） | 已有完整标签、追求速度 |
+| **Low** | 流水线模式：批量搜索后直接组装提示词（MOSS 另需编译） | 追求最快速度，场景不复杂 |
 | **Medium** | Agent 循环模式：多轮迭代搜索，最多 8 轮 | 日常使用，速度与质量平衡 |
 | **High** | Agent 循环模式：宽召回 + 深探索，最多 10 轮 | 复杂场景、多人物、追求极致精度 |
 
@@ -50,11 +52,12 @@
 本插件的核心特性有：
 
 - **Agent 智能搜索**（v1.2.9 新增）：生成提示词时自动搜索 Danbooru 标签库，验证和补充标签，消除 LLM 幻觉。四级努力控制（Low / Medium / High），在速度与精度间灵活选择。
-- **双模式支持**：NewBie 模式生成结构化 XML 提示词；Anima 模式生成 `## Prompt` + `## 中文解释` 格式提示词，两种模式可在节点内无缝切换。
+- **三种模型支持**：NewBie 生成结构化 XML，Anima 生成标签与英文自然语言，MOSS 生成 caption 或 Layout，可在节点内切换。
 - **智能提示词转化**：支持将简单的自然语言、Danbooru 标签串，完美转化为目标模型所需的提示词格式。
 - **多模态视觉反推**：支持传入图片，利用多模态大模型直接反推生成高精度提示词。
 - **高鲁棒性与自动修复**：内置 XML 语法解析与自动修复机制，外加 API 网络异常/格式异常自动重试逻辑（最高 3 次），确保工作流不中断。
-- **画风预设与管理**：内置数十种高质量艺术家/画风预设，支持按 NewBie / Anima 区分、一键注入，并可从风格注入节点直接保存当前组合。
+- **画风预设与管理**：内置数十种高质量艺术家/画风预设，支持按 NewBie / Anima / MOSS 区分、一键注入，并可从风格注入节点直接保存当前组合。
+- **可选联网搜索**：在 Medium / High 下启用 Tavily 搜索，按需查找角色、作品、服装等参考资料，辅助生成提示词。
 - **深度思考与破限支持**：适配主流 API 的"深度思考"模式（Deepseek、OpenRouter、Gemini、Anthropic、Kimi、MIMO、Vercel 等），内置 NSFW 提示词破限框架。
 
 - 项目 GitHub 地址：https://github.com/SuzumiyaAkizuki/ComfyUI-NewBie-LLM-Formatter
@@ -113,7 +116,7 @@ comfy node install NewBie-LLM-Formatter
 
    ![image-20251226145335813](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261453308.png)
 
-3. 进入文件夹，找到 `LPF_config.json.example` 文件，右键重命名，删掉 `.example` 后缀，使其变为 `LPF_config.json`。
+3. 进入文件夹，将 `LPF_config.json.example` **复制一份**并命名为 `LPF_config.json`。已有配置的用户请保留原文件，按需补充新字段，避免覆盖 API Key 和自定义风格。
 
    ![重命名前](https://akizukipic.oss-cn-beijing.aliyuncs.com/img/202512261454909.png)
 
@@ -129,54 +132,63 @@ comfy node install NewBie-LLM-Formatter
 
 ## 配置文件说明
 
-插件的所有配置均集中在 `LPF_config.json` 中。以下是各字段的完整说明：
+插件使用 `LPF_config.json` 保存 API 设置、各模型的补充要求、示例对话和风格预设。首次使用时，将 `LPF_config.json.example` 复制为 `LPF_config.json`，填写自己的 API 信息。通过命令行安装的用户也需要完成此步骤。
+
+升级时保留自己的配置，参考新版示例补充所需字段即可。修改后建议重启 ComfyUI；新增风格预设后刷新页面以更新下拉列表。请勿分享含有密钥的配置文件。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `api_key` | `string` | LLM 的 API Key。**强烈建议在此处填写，而非在节点 UI 中输入**，否则 API Key 会随工作流原图泄露。 |
-| `api_url` | `string` | API 服务的主机地址，例如 `https://openrouter.ai/api/v1`。 |
-| `tavily_api_key` | `string` | Tavily 联网搜索 API Key，默认为空。填写后，在节点打开 `enable_web_search`，并选择 `Medium` 或 `High`。 |
-| `model_list` | `array` | 可用模型名称列表，将显示在节点的下拉框中。 |
-| `system_prompt` | `string` | **NewBie 模式**发送给 LLM 的系统提示词，内置了基本的格式化指令和破限命令。可自行修改以调整 LLM 的行为。 |
-| `gemini_jailbreaker` | `string` | 针对非 Gemini 官方平台的 Gemini 模型的增强提示词，会拼接在 `system_prompt` 之前。仅在使用非官方 Gemini API 中转时生效。 |
-| `fewshot_user` | `string` | **NewBie模式**Few-shot 注入功能：此字段为注入的一轮对话中「用户」的内容。与 `fewshot_assistant` 同时填写时生效。 |
-| `fewshot_assistant` | `string` | **NewBie模式**Few-shot 注入功能：此字段为注入的一轮对话中「AI」的回复内容。可用于增强模型在特定方面的输出能力。 |
-| `gemma_prompt` | `string` | 拼接在 **NewBie 模式** XML 输出前的固定引导词，用于指导 NewBie 模型（Gemma3 4B）理解提示词格式。通常无需修改。Anima 模式下不使用此字段。 |
-| `system_prompt_anima` | `string` | **Anima 模式**发送给 LLM 的系统提示词。指导模型输出 `## Prompt`（标签块 + 英文自然语言段落）+ `## 中文解释`（分点设计说明）的 Markdown 标题结构。 |
-| `fewshot_user_anima` | `string` | **Anima模式**Few-shot 注入功能。示例用户输入应包含标签 + 自然语言描述。与 `fewshot_assistant_anima` 同时填写时生效。 |
-| `fewshot_assistant_anima` | `string` | **Anima模式**Few-shot 注入功能。示例 AI 回复应为 `## Prompt`（标签块 + 英文 NL）+ `## 中文解释` 格式。 |
-| `artists_anima` | `string` | **Anima模式**参考画师列表，指导LLM选择合适的画师。可以在[这个视频](https://www.bilibili.com/video/BV1Q1w1zKEwk)或者[这个链接](https://drive.google.com/file/d/1CtcODfWbDl8KThORS0GHZfcWKCCMUUmD/view)中下载对应的内容。为保护作者的知识产权，这里不提供对应的文本。 |
-| `styles` | `object` | 预设风格提示词集合，供 XML Style Injector 节点使用。每个预设可标记适用模式（NewBie / Anima / Both），也可通过 Style Preset Saver 节点或直接编辑此文件来添加。 |
+| `api_key` | `string` | LLM 的 API Key。建议在此填写，避免密钥随工作流或原图被分享。 |
+| `api_url` | `string` | 兼容 OpenAI 的 API 地址，填写到 `/v1` 等服务要求的路径，例如 `https://openrouter.ai/api/v1`。 |
+| `tavily_api_key` | `string` | 可选的 Tavily 搜索密钥。填写后还需在节点打开 `enable_web_search` 并选择 Medium / High；留空不影响标签搜索。 |
+| `model_list` | `array` | LLM 模型名称列表，显示在节点的模型下拉框中；与 `mode` 所选的图像模型不同。 |
+| `gemini_jailbreaker` | `string` | 非 Gemini 官方 API 中转使用的增强提示词；通常无需修改。 |
+| `gemma_prompt` | `string` | NewBie 输出前的固定引导词，通常无需修改；Anima 和 MOSS 不使用。 |
+| `fewshot_user` / `fewshot_assistant` | `string` | NewBie 的示例用户输入与示例回复，两项同时填写时生效。 |
+| `fewshot_user_anima` / `fewshot_assistant_anima` | `string` | Anima 的示例用户输入与示例回复，两项同时填写时生效。 |
+| `fewshot_user_moss` / `fewshot_assistant_moss` | `string` | MOSS 的示例用户输入与示例回复，两项同时填写时生效。 |
+| `artists_anima` | `string` | Anima 参考画师列表。可参考[视频说明](https://www.bilibili.com/video/BV1Q1w1zKEwk)或[资料链接](https://drive.google.com/file/d/1CtcODfWbDl8KThORS0GHZfcWKCCMUUmD/view)。 |
+| `system_prompt_extra` | `string` | NewBie 的个人补充要求，如构图、光照或描述偏好；各努力等级均生效。 |
+| `system_prompt_extra_anima` | `string` | Anima 的个人补充要求；各努力等级均生效。 |
+| `system_prompt_extra_moss` | `string` | MOSS 的个人补充要求；各努力等级均生效，不应覆盖模型必需的格式规则。 |
+| `styles` | `object` | 风格预设集合。每个预设包含 `mode`、`artist`、`style`，可直接编辑或用 Style Preset Saver 保存。`mode` 可选 NewBie、Anima、MOSS、Both（通用）。 |
 
-### Anima 模式提示词格式
+### 补充要求与旧配置迁移
 
-`system_prompt_anima` 要求 LLM 输出 `## Prompt` + `## 中文解释` 的 Markdown 标题结构：
+插件已内置三种模型的提示词格式，日常使用无需自行填写整份系统提示词。将个人偏好写入对应的 `system_prompt_extra*` 字段即可；留空时使用默认规则。
 
+旧配置中的 `system_prompt`、`system_prompt_anima`、`system_prompt_moss` 已不再生效。升级时只需把其中自己添加的偏好移入对应的补充字段，无需复制整份旧格式规范。
+
+### 示例对话（Few-shot）
+
+Few-shot 用一组输入与回复示例帮助 LLM 理解期望的表达方式。三种模式各自使用对应字段；不需要时可留空。
+
+示例回复建议写成含 `xml_out` 和 `text_out` 两个字符串的 JSON：前者放目标模型的完整提示词，后者放中文说明与翻译。由于配置字段本身是字符串，内部引号和换行需要转义。例如：
+
+```json
+{
+  "fewshot_user_moss": "一只坐在窗边的白猫，柔和水彩风格",
+  "fewshot_assistant_moss": "{\"xml_out\":\"A white cat sits beside a window in soft watercolor, lit by gentle daylight.\",\"text_out\":\"白猫坐在窗边，以柔和水彩表现，温柔的日光照亮主体。\"}"
+}
 ```
-## Prompt
-[标签块：Danbooru 风格 tag，逗号分隔，单行]
-[自然语言段落：2~3 句英文，描述构图、光线、氛围、背景]
 
-## 中文解释
-[分点说明该提示词的设计逻辑和标签选择理由]
+已有的 NewBie XML 示例、Anima / MOSS 的 `## Prompt` 与 `## 中文解释` 示例仍可读取。节点会自动分离提示词与说明，无需在工作流中手动解析 JSON。
+
+### 风格预设
+
+`styles` 位于示例配置末尾，便于集中管理。MOSS 预设示例：
+
+```json
+{
+  "水彩手绘": {
+    "mode": "MOSS",
+    "artist": "",
+    "style": "watercolor, soft pigment washes, textured paper"
+  }
+}
 ```
 
-Agent 模式下遵循同样的输出格式。普通模式（非 Agent）下也使用此格式，`xml_out` 返回 `## Prompt` 下的内容，`text_out` 返回 `## 中文解释` 下的内容。
-
-### Few-shot 注入的请求体结构
-
-> 开发者笔记：few-shot技术是一种提示词工程，旨在通过在提示中提供少量输入-输出示例，让大语言模型快速理解任务模式并生成符合预期的回答。出于某些原因，我无法提供few-shot的示例内容。但是，你可以利用某些方面能力更强的LLM（比如grok）生成一轮示例对话，并填入few-shot注入词中，之后改用其它通用能力更强的LLM（比如gemini）。
-
-当 `fewshot_user` 和 `fewshot_assistant` 均不为空时，请求体结构如下：
-
-```python
-messages = [
-    {"role": "system",    "content": system_prompt},
-    {"role": "user",      "content": fewshot_user},       # 注入的示例用户输入
-    {"role": "assistant", "content": fewshot_assistant},  # 注入的示例 AI 回复
-    {"role": "user",      "content": 用户在节点中输入的内容}
-]
-```
+`mode: "MOSS"` 的预设仅在 MOSS 模式显示；`Both` 表示通用预设。示例配置已提供多组 MOSS 风格，可按需复制到自己的配置中。
 
 ### API 配置优先级
 
@@ -196,7 +208,7 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 
 ### 1. LLM Xml Prompt Formatter
 
-**功能：** 调用 LLM API，将用户输入的自然语言或标签集格式化为提示词，根据所选模式输出 XML 格式（NewBie）或纯文本格式（Anima）。
+**功能：** 调用 LLM API，将用户输入的自然语言或标签集格式化为提示词，根据所选模式输出 NewBie XML、Anima 提示词或 MOSS caption / Layout。
 
 **输入参数：**
 
@@ -206,29 +218,35 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 | `api_key` | STRING | API Key。若配置文件中已有有效值，此处输入不生效。 |
 | `api_url` | STRING | API 主机地址。若配置文件中已有有效值，此处输入不生效。 |
 | `model_name` | STRING/下拉框 | 模型名称。若配置文件中的 `model_list` 有效，显示为下拉框；否则显示为文本输入框。 |
-| `mode` | 下拉框 | **NewBie**（默认）或 **Anima**。决定使用哪套 system prompt 以及输出解析方式。 |
-| `thinking` | BOOLEAN | 深度思考模式开关。普通模式和 Agent 模式均生效。`true` 时 Agent 会流式读取并在控制台实时显示模型返回的 `reasoning_content` / `reasoning` / `reasoning_details`，工具调用轮次会原样回传推理字段；这些内容不会混入节点输出。思考模式通常更慢且消耗更多 Token。 |
-| `agent_effort` | 下拉框 | **[v1.2.9 新增]** Agent 努力等级。`Close`（默认）= 关闭 Agent，走普通模式；`Low` = 流水线模式（单轮批量搜索 + LLM 组装，不走 Agent 循环，最快）；`Medium` = Agent 循环模式（`full_scene` 预设，平衡召回质量与收敛速度，最多 8 轮）；`High` = Agent 循环模式（`concept_explore` 宽召回预设 + 默认携带 wiki 释义，最多 10 轮，最深入）。 |
+| `mode` | 下拉框 | **NewBie**（默认）、**Anima** 或 **MOSS**。决定目标模型的提示词格式。 |
+| `thinking` | BOOLEAN | 深度思考模式开关。普通模式和 Agent 模式均生效。开启后可在控制台查看模型返回的思考内容；这些内容不会混入提示词输出。思考模式通常更慢且消耗更多 Token。 |
+| `agent_effort` | 下拉框 | Agent 努力等级。`Close`（默认）= 关闭标签搜索，直接生成提示词（MOSS 仍需编译）；`Low` = 流水线模式（单轮批量搜索 + LLM 组装，不走 Agent 循环，最快）；`Medium` = Agent 循环模式（`full_scene` 预设，平衡召回质量与收敛速度，最多 8 轮）；`High` = Agent 循环模式（`concept_explore` 宽召回预设 + 默认携带 wiki 释义，最多 10 轮，最深入）。 |
 | `force_full_agent_run` | BOOLEAN | 强制本次 Agent 从头生成，不复用上一轮结果。通常保持关闭；当你觉得上一轮缓存影响了本次修改时，再临时打开。 |
-| `enable_web_search` | BOOLEAN（可选） | Tavily 联网搜索开关，默认关闭，仅 `Medium` / `High` 生效。启用且已配置 `tavily_api_key` 时，Agent 可按需搜索角色、作品和服装等参考资料，并自动注入联网搜索规则；关闭或缺少 Key 时不提供该工具和规则。切换有效启用状态后会重新生成。 |
+| `enable_web_search` | BOOLEAN（可选） | Tavily 联网搜索开关，默认关闭，仅 `Medium` / `High` 生效。启用且已配置 `tavily_api_key` 时，Agent 可按需搜索角色、作品和服装等参考资料；关闭或缺少 Key 时不进行网页搜索。切换有效启用状态后会重新生成。 |
 | `user_text` | STRING | 待转换的自然语言描述或标签集。 |
 
 **输出参数：**
 
 | 参数 | 说明 |
 |------|------|
-| `xml_out` | NewBie 模式：清洗并修复后的 XML 格式提示词。Anima 模式：`## Prompt` 标题下的内容（标签块 + 英文自然语言段落）。 |
-| `text_out` | NewBie 模式：LLM 输出的 XML 代码块以外的额外说明信息。Anima 模式：`## 中文解释` 标题下的分点设计说明。 |
+| `xml_out` | 可直接连接目标模型文本编码节点的提示词：NewBie 为 XML（含配置的引导前缀），Anima 为标签与英文自然语言，MOSS 为 caption 或 Layout。 |
+| `text_out` | 中文说明与翻译。NewBie 包含 caption 翻译；Anima / MOSS 包含标签、构图等说明及英文自然语言翻译。MOSS Layout 还会说明画布尺寸。 |
 
-**两种模式的行为差异：**
+**三种模式的行为差异：**
 
-| 行为 | NewBie 模式 | Anima 模式 |
-|------|------------|-----------|
-| 使用的 system prompt | `system_prompt` | `system_prompt_anima` |
-| `gemma_prompt` 前缀 | 拼接到输出前 | 不使用 |
-| 输出解析 | 提取 XML 代码块，校验并修复格式 | 提取 `## Prompt` 和 `## 中文解释` 两个 Markdown 标题段 |
-| XML 自动修复 | 启用 | 不启用 |
-| Agent 模式 | 多轮工具搜索 → XML 输出 | 多轮工具搜索 → `## Prompt` + `## 中文解释` 输出 |
+| 行为 | NewBie | Anima | MOSS |
+|------|--------|-------|------|
+| 提示词格式 | 结构化 XML | 标签与英文自然语言 | caption 或 Layout |
+| 个人补充字段 | `system_prompt_extra` | `system_prompt_extra_anima` | `system_prompt_extra_moss` |
+| `gemma_prompt` 前缀 | 使用 | 不使用 | 不使用 |
+| XML 自动修复 | 启用 | 不适用 | 不适用 |
+| Agent 标签搜索与增量修订 | 支持 | 支持 | 支持 |
+
+**MOSS 使用提示：**
+
+- 普通人物、照片和插画可使用 caption，支持 Danbooru 标签、自然语言或两者混合。需要文字定位、分镜或明确物体空间关系时，可在输入中要求 Layout。
+- Layout 请明确生成尺寸；宽高必须是 16 的正整数倍，并在生成工作流中使用 `text_out` 提示的相同尺寸。
+- 三种模式均只生成提示词，不直接生成图片。MOSS 在所有努力等级下都需要可用的远程格式与编译工具；所选 LLM API 也需支持工具调用。工具不可用时会报错，请检查服务连接。
 
 **增量修订与复用：**
 
@@ -242,7 +260,7 @@ ComfyUI-NewBie-LLM-Formatter 提供三个节点：
 
 - **自动重试**：遇到网络抖动或 API 报错时，最多自动重试 3 次。
 - **XML 自动修复**（仅 NewBie 模式）：使用 `lxml` 库对 LLM 输出的 XML 进行格式校验；若检测到格式错误，会自动修复并在控制台打印差异对比。
-- **Agent 自动降级**：Agent 模式下 MCP 服务不可用时，自动回退为普通模式，不阻塞工作流。
+- **异常恢复**：搜索或请求失败时尽量利用已有结果完成输出；无法完成时明确报错。MOSS 必须完成提示词编译，工具不可用时不会交付未完成的草稿。
 - **Agent 死循环检测**：自动检测重复工具调用，超过 3 次强制退出循环。
 
 **推荐模型（计价参考 [OpenRouter](https://openrouter.ai/)，均关闭思考模式）：**
@@ -328,18 +346,16 @@ A：1girl,white_hair,blue_eyes, medium_hair, high_ponytail, small_breasts, sidel
 要求人物是萌系画风，可爱一点。
 ```
 
-**`xml_out` 示例输出（`## Prompt` 部分）：**
+**`xml_out` 示例输出：**
 
 ```
-## Prompt
 masterpiece, best quality, score_7, safe, @kantoku, @tiv, @mika pikazo, @anmi, 1girl, white hair, blue eyes, medium hair, high ponytail, small breasts, sidelocks, serafuku, white shirt, deep blue skirt, deep blue sailor collar, short sleeves, short skirt, shirt tucked in, red neckerchief, utility belt, shorts under skirt, elbow pads, fingerless gloves, toned, tactical school uniform, fast helmet, headset, full body harness, chest harness, leg loops, waist belt, upper body, close-up, straight-on, facing viewer, confident, proud, arched back, v over eye, hand on hip, wind lift, abstract background, glass shards, blue theme, purple theme, graphic background
 An adorable girl with white hair and striking blue eyes poses confidently in her tactical sailor uniform, standing with an arched back and one hand on her hip while making a cute V sign over her eye. Her high ponytail and white shirt flutter in the wind, and she wears a FAST helmet, headset, and complex full-body climbing harness over her outfit. The background is a stylish abstract composition of vibrant blue and purple glass shards with modern graphic elements.
 ```
 
-**`text_out` 示例输出（`## 中文解释` 部分）：**
+**`text_out` 示例输出：**
 
 ```
-## 中文解释
 - 标签结构：质量锚点(masterpiece, best quality, score_7, safe) → 画师(@kantoku, @tiv, @mika pikazo, @anmi) → 主体(1girl) → 角色特征(white hair, blue eyes, ...) → 服装(serafuku, ...) → 装备(fast helmet, full body harness, ...) → 构图(upper body, close-up) → 姿势表情(confident, v over eye, hand on hip) → 背景(abstract background, glass shards)。
 - 自然语言描述了角色的自信姿态、V 字手势、战术装备细节和抽象背景氛围，补充了标签无法精确表达的空间关系和画面张力。
 - 翻译：一位白发蓝眸的可爱女孩穿着战术水手服，挺起胸膛一手叉腰，在眼前比出 V 字手势，骄傲地直视观众。高马尾和衬衫在风中飘动，佩戴战术头盔和全身攀爬安全带。背景是蓝紫色玻璃碎片组成的时尚抽象构图。
@@ -351,15 +367,15 @@ An adorable girl with white hair and striking blue eyes poses confidently in her
 
 ### 2. XML Style Injector
 
-**功能：** 将画师和风格信息注入到提示词中，支持 NewBie（XML）和 Anima（纯文本）两种模式。
+**功能：** 将画师和风格信息注入到提示词中，支持 NewBie（XML）、Anima（纯文本）和 MOSS（caption / Layout）三种模式。
 
 **输入参数：**
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `xml_input` | STRING | 待处理的提示词文本。NewBie 模式下应为含 `<img>` 标签的 XML；Anima 模式下应为换行分隔的纯文本。 |
-| `mode` | 下拉框 | **NewBie** 或 **Anima**，需与 LLM Xml Prompt Formatter 节点的模式保持一致。 |
-| `preset` | 下拉框 | 选择预设风格提示词集合，内容来自 `LPF_config.json` 的 `styles` 字段。新预设会显示 `[NewBie]`、`[Anima]` 或 `[Both]` 前缀；旧工作流中的原名称仍然可用。 |
+| `xml_input` | STRING | 待处理的提示词文本。NewBie 模式下应为含 `<img>` 标签的 XML；Anima 模式下为纯文本；MOSS 模式下为 caption 或 Layout 提示词。 |
+| `mode` | 下拉框 | **NewBie**、**Anima** 或 **MOSS**，需与 LLM Xml Prompt Formatter 节点的模式保持一致。 |
+| `preset` | 下拉框 | 选择预设风格提示词集合，内容来自 `LPF_config.json` 的 `styles` 字段。新预设会显示 `[NewBie]`、`[Anima]`、`[MOSS]` 或 `[Both]` 前缀；旧工作流中的原名称仍然可用。 |
 | `artist_add` | STRING（可选） | 额外的画师标签，将**拼接在预设画师列表之前**。 |
 | `style_add` | STRING（可选） | 额外的风格标签，将**拼接在预设风格列表之前**。 |
 
@@ -384,7 +400,7 @@ An adorable girl with white hair and striking blue eyes poses confidently in her
 
 **Anima 模式行为：**
 
-> 开发者笔记：适用于NewBie模型的画风串不一定适用于Anima模型。虽然我做了Anima模式的适配，但是我强烈不建议你使用。
+不同模型对画师和风格词的响应可能不同，建议优先使用对应模式的预设。
 
 Anima 模式下的画师和风格注入逻辑：
 
@@ -406,6 +422,19 @@ Anima 模式下的画师和风格注入逻辑：
 示例：`[ciloranko], maccha_(mochancc), (tidsean:1.2), wlop 1.1, year_2024`
 → `@ciloranko, @maccha_mochancc, @tidsean, @wlop, @year_2024`
 
+**MOSS 模式行为：**
+
+非空画师与风格分别以前置块注入，顺序为画师、风格，再空一行保留原提示词：
+
+```text
+<|artist|> 画师内容 <|/artist|>
+<|style|> 风格内容 <|/style|>
+
+原始 MOSS 提示词
+```
+
+为空的字段不生成对应块；两个字段均为空时原样输出。MOSS 不使用 Anima 的画师格式清洗规则。保存当前组合时，可将 `style_save_metadata` 连接到 Style Preset Saver。
+
 配置文件内置数十个预设风格串，可在[此链接](https://docs.qq.com/sheet/DTUNCQW5TWFBMVGhY?tab=BB08J2)查看例图。
 
 ---
@@ -418,9 +447,10 @@ Anima 模式下的画师和风格注入逻辑：
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `text_input` | STRING | 输入包含 `<artist>`、`<style>`，以及可选 `<mode>` 的文本；可直接连接风格注入节点的 `style_save_metadata` 输出。 |
+| `text_input` | STRING | 输入包含 `<artist>`、`<style>` 和可选 `<mode>` 的文本，或含 `<|artist|>` / `<|style|>` 块的 MOSS 提示词；可直接连接风格注入节点的 `style_save_metadata` 输出。 |
 | `preset_name` | STRING | 新预设的名称。若名称为空或与已有预设重名，节点将放弃保存。 |
 | `save_trigger` | BOOLEAN | 保存开关。仅当显示 `Save as Styles` 时才会执行保存操作；显示 `Do Not Save` 时仅提取不保存。 |
+| `mode` | 下拉框（可选） | 默认 `Auto`，根据输入模式信息或 MOSS 标记自动判断；也可手动指定 NewBie、Anima、MOSS 或 Both。 |
 
 **输出参数：**
 
@@ -428,7 +458,7 @@ Anima 模式下的画师和风格注入逻辑：
 |------|------|
 | `extracted_tags` | 从输入中提取到的风格标签预览。若输入包含模式信息，会显示为 `<mode>...</mode>\n<artist>...</artist>\n<style>...</style>`；无论是否保存均会输出。 |
 
-> **注意：** 旧版只包含 `<artist>` / `<style>` 的保存输入仍然可用；新版从风格注入节点保存时会同时带上模式信息，便于在预设列表中区分 NewBie、Anima 或通用风格。
+> **注意：** 旧版只包含 `<artist>` / `<style>` 的保存输入仍然可用；新版从风格注入节点保存时会同时带上模式信息，便于在预设列表中区分 NewBie、Anima、MOSS 或通用风格。
 
 ---
 
@@ -443,7 +473,7 @@ Anima 模式下的画师和风格注入逻辑：
 
 ## 参考工作流
 
-示例工作流保存在项目的 `NewBie_LLM_Formatter_example.json` 中。
+项目提供 [NewBie 示例工作流](NewBie示例工作流.json) 和 [Anima 示例工作流](Anima示例工作流.json)。使用 MOSS 时，请在提示词生成与风格注入节点中选择 MOSS，并将提示词输出连接到对应的 MOSS 文本编码节点。
 
 **加载方法：** 右键另存为 → 打开 ComfyUI → 按 <kbd>Ctrl</kbd>+<kbd>O</kbd> → 选择此文件。
 
@@ -455,6 +485,14 @@ Anima 模式下的画师和风格注入逻辑：
 
 <details open>
 <summary>展开/折叠更新历史</summary>
+
+### 2026年10月20日 v1.4.0
+
+- **新增 MOSS 支持**：自然语言、标签和图片均可转换为 MOSS caption 或 Layout，支持 Agent 搜索与增量修订；Layout 会提示生成所需的画布尺寸。
+- **MOSS 风格管理**：风格注入与保存节点支持 MOSS，预设列表按模式筛选；示例配置新增多组 MOSS 风格。
+- **可选联网搜索**：配置 Tavily 密钥并在 Medium / High 中打开 `enable_web_search`，可按需查找角色、作品和服装等参考资料。
+- **配置更简洁**：三种模型均内置提示词格式，个人偏好改用 `system_prompt_extra*`；补充 MOSS 示例对话字段，风格预设集中在配置末尾。旧 `system_prompt*` 字段请按配置说明迁移。
+- **输出更清晰稳定**：提示词与中文说明分开输出，补充英文自然语言的完整翻译；改善 MOSS 完成提示词后的输出稳定性，减少说明文字混入提示词的情况。
 
 ### 2026年08月25日 v1.3.6
 
@@ -603,7 +641,7 @@ Anima 模式下的画师和风格注入逻辑：
 - 大幅提升**非 Gemini 官方平台**下 Gemini 模型的 NSFW 生成能力。若仍然失败（多见于 G 向），可尝试在敏感词中插入字符以破坏 token（如 `blood` → `blo···od`）。
 
   > 开发者注：不同 API 中转平台的破限效果存在差异，其中 [OpenRouter](https://openrouter.ai/) 效果最佳。Gemini 官方平台在加入强力破限词后反而可能导致无输出，故官方平台不做破限适配。
-  
+
 - 优化思考模式开关逻辑，支持 Gemini 官方平台；对不支持的平台不再报错，仅打印警告。
 - 更新示例工作流。
 

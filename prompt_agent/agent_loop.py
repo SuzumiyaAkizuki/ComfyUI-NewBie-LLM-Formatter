@@ -51,23 +51,35 @@ def complete_moss_output(agent, messages, content=None):
         except ValueError:
             pass
         messages.append({"role": "assistant", "content": content})
-    messages.append({"role": "user", "content":
-        "最后必须调用 compile_moss_prompt 编译本次完整草稿（caption 也必须编译）。"
-        "保留 Danbooru 标签和用户要求；如缺少规范，先调用 get_moss_image_format。"
-        "得到成功结果后输出 xml_out/text_out JSON，xml_out 必须逐字等于最近的成功编译结果。"
-        "禁止直接输出未编译草稿或自行修改编译结果；本阶段不要重新搜索标签。"})
-    available = [t for t in agent._get_available_tools() if t["function"]["name"] in {
-        "get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"}]
-    if "compile_moss_prompt" not in {t["function"]["name"] for t in available}:
-        raise RuntimeError("MOSS 缺少 compile_moss_prompt 工具，无法交付最终提示词")
+    available = []
     for _ in range(6):
         if _COMFY_AVAILABLE:
             comfy.model_management.throw_exception_if_processing_interrupted()
         compiled = getattr(agent, "_moss_compiled_prompt", None)
+        if compiled:
+            instruction = (
+                "本次 compile_moss_prompt 已成功，编译结果见上文工具返回值。"
+                "现在只整理最终 JSON，不再调用工具，不输出 draft 或工具参数。"
+                "只返回恰好包含 xml_out 和 text_out 两个字符串字段的合法 JSON；"
+                "xml_out 原样使用最近的成功编译结果，text_out 填写中文解释及所需翻译。"
+                "若上一条回答格式错误，只修正 JSON 包装和解释，正确转义换行、引号和反斜杠。")
+        else:
+            instruction = (
+                "本次尚无成功编译结果，必须调用 compile_moss_prompt 编译完整草稿（caption 也必须编译）。"
+                "保留 Danbooru 标签和用户要求；如缺少规范，先调用 get_moss_image_format。"
+                "若此前编译失败，根据工具错误修正草稿后重新编译。"
+                "得到成功结果后输出 xml_out/text_out JSON，xml_out 必须逐字等于最近的成功编译结果。"
+                "禁止直接输出未编译草稿或自行修改编译结果；本阶段不要重新搜索标签。")
+        messages.append({"role": "user", "content": instruction})
         request_args = dict(model=agent.model_name,
             messages=_sanitize_messages_for_gemini(messages, getattr(agent, "model_name", None)),
             temperature=0.7, extra_body=agent._extra_body)
         if not compiled:
+            if not available:
+                available = [t for t in agent._get_available_tools() if t["function"]["name"] in {
+                    "get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"}]
+            if "compile_moss_prompt" not in {t["function"]["name"] for t in available}:
+                raise RuntimeError("MOSS 缺少 compile_moss_prompt 工具，无法交付最终提示词")
             # After a premature final answer, require the missing compiler call.
             choice = {"type": "function", "function": {"name": "compile_moss_prompt"}} if failures else "auto"
             request_args.update(tools=available, tool_choice=choice)
@@ -101,8 +113,7 @@ def complete_moss_output(agent, messages, content=None):
         except ValueError as error:
             failures.append({"stage": "final_output", "error": str(error)})
             _log_warn(f"MOSS 最终输出尚不可交付: {error}")
-        messages.extend([{"role": "assistant", "content": content}, {"role": "user", "content":
-            "最终回答无效：请先成功编译本次草稿，再把工具返回值原样放入 xml_out，中文解释放入 text_out。"}])
+        messages.append({"role": "assistant", "content": content})
     error = ValueError("MOSS 最终编译/JSON 输出失败: " + (str(failures[-1]) if failures else "未返回最终 JSON"))
     _default_error_writer(error,
         context={"purpose": "MOSS finalization", "model": getattr(agent, "model_name", None),

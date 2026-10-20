@@ -3,7 +3,7 @@ import { app } from "../../scripts/app.js";
 const NODE_CLASS = "LLM_Xml_Style_Injector";
 const MODE_WIDGET = "mode";
 const PRESET_WIDGET = "preset";
-const PREFIX_RE = /^\[(NewBie|Anima|Both)\]\s*/;
+const PREFIX_RE = /^\[(NewBie|Anima|MOSS|Both)\]\s*/;
 
 function getWidget(node, name) {
   return node?.widgets?.find((widget) => widget.name === name);
@@ -48,6 +48,7 @@ function buildPresetIndex(values) {
       if (preset.mode === "Both") {
         byRawAndMode.set(`${preset.raw}\u0000NewBie`, preset.value);
         byRawAndMode.set(`${preset.raw}\u0000Anima`, preset.value);
+        byRawAndMode.set(`${preset.raw}\u0000MOSS`, preset.value);
       }
     }
   }
@@ -71,7 +72,7 @@ function filterPresetWidget(node) {
   const originalValues = node.__newbieStylePresetValues ?? getValues(presetWidget).slice();
   node.__newbieStylePresetValues = originalValues;
 
-  const selectedMode = modeWidget.value === "Anima" ? "Anima" : "NewBie";
+  const selectedMode = ["Anima", "MOSS"].includes(modeWidget.value) ? modeWidget.value : "NewBie";
   const index = buildPresetIndex(originalValues);
   const filteredValues = index.prefixed
     .filter((preset) => isAllowedMode(preset.mode, selectedMode))
@@ -81,7 +82,8 @@ function filterPresetWidget(node) {
   if (!nextValue && filteredValues.includes(presetWidget.value)) {
     nextValue = presetWidget.value;
   }
-  if (!nextValue && presetWidget.value && !splitPreset(presetWidget.value).mode) {
+  if (!nextValue && presetWidget.value && !splitPreset(presetWidget.value).mode
+      && !index.prefixed.some((preset) => preset.raw === presetWidget.value)) {
     nextValue = presetWidget.value;
     filteredValues.push(presetWidget.value);
   }

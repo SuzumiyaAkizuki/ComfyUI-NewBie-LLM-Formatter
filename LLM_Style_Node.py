@@ -40,6 +40,8 @@ def normalize_style_mode(value):
         return "NewBie"
     if mode == "anima":
         return "Anima"
+    if mode == "moss":
+        return "MOSS"
     return "Both"
 
 
@@ -49,7 +51,7 @@ def style_display_name(name, style_data):
 
 
 def strip_style_display_prefix(preset):
-    return re.sub(r'^\[(?:NewBie|Anima|Both)\]\s*', '', preset or '').strip()
+    return re.sub(r'^\[(?:NewBie|Anima|MOSS|Both)\]\s*', '', preset or '').strip()
 
 
 def resolve_style_preset(preset, styles):
@@ -359,7 +361,7 @@ class LLM_Xml_Style_Injector:
         return {
             "required": {
                 "xml_input": ("STRING", {"forceInput": True}),
-                "mode": (["NewBie", "Anima"],),
+                "mode": (["NewBie", "Anima", "MOSS"],),
                 "preset": (style_keys,),
             },
             "optional": {
@@ -408,6 +410,20 @@ class LLM_Xml_Style_Injector:
             return input_val if input_val else preset_val
 
         target_style = combine_tags(style_add, preset_style)
+        if mode == "MOSS":
+            target_artist = combine_tags(artist_add, preset_artist)
+            blocks = []
+            for field, content in (("artist", target_artist), ("style", target_style)):
+                if content:
+                    blocks.append(f"<|{field}|> {content} <|/{field}|>")
+            result = '\n'.join(blocks) + '\n\n' + xml_input if blocks else xml_input
+            save_metadata = (
+                f"<mode>MOSS</mode>\n"
+                f"<artist>{_xml_text(target_artist)}</artist>\n"
+                f"<style>{_xml_text(target_style)}</style>"
+            )
+            return (result, save_metadata)
+
         save_metadata = build_style_save_metadata(mode, target_artist_tags or [], target_style)
 
         if mode == "Anima":

@@ -10,4 +10,6 @@ site/
 AGENTS.md
 tests/
 error/
-
+/artifacts/
+/.agents/
+/.codex/

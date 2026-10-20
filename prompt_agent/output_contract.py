@@ -12,7 +12,13 @@ def output_instruction(mode):
             '示例：{"xml_out":"...","text_out":"中文说明"}。'
             "换行、双引号和反斜杠必须按 JSON 标准转义；不得添加 JSON 外的文字、Markdown 标题或代码围栏。"
             "此契约优先于配置示例、缓存规范和格式工具中对外层输出包装的要求；其中的提示词内容结构仍须遵守。"
-            "工具调用阶段照常调用工具，仅最终回答遵循此 JSON 契约。")
+            "工具调用阶段照常调用工具，仅最终回答遵循此 JSON 契约。"
+            "\n\n## 中文说明与翻译（由本节点规定）\n"
+            + ("text_out 必须包含最终 XML 中 caption 的完整中文翻译。" if mode == "NewBie" else
+               "text_out 分点解释实际采用的标签、构图、空间关系和光照设计，并完整翻译最终提示词中的英文自然语言。")
+            + ("Layout 还必须说明本次草稿的画布宽高，提醒生成工作流使用相同尺寸。" if mode == "MOSS" else "")
+            + "只解释最终成品，使用中立、简洁的中文；不得输出思考过程、改动清单或无关背景。"
+            "上述说明全部放入 text_out，不向 xml_out 加入翻译、接口字段、解释文字或展示用代码围栏。")
 
 SCHEMA = {"type": "object", "properties": {
     "xml_out": {"type": "string"}, "text_out": {"type": "string"}},

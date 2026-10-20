@@ -6,6 +6,7 @@ Agent 模式专用提示词。
 
 from prompt_agent.output_contract import output_instruction, normalize_fewshot
 from prompt_agent.message_protocol import _is_gemini_model
+from prompt_agent.prompt_formats import get_format_spec, get_system_additions
 
 QUERY_REWRITE_PROMPT = """
 # Role
@@ -139,242 +140,6 @@ _AGENT_SYSTEM_PROMPT_TEMPLATE = """
 """
 
 
-_NEWBIE_OUTPUT_FORMAT = """
-## 输出格式要求
-
-最终输出一个 JSON 对象：xml_out 为完整 XML 字符串，text_out 为中文翻译字符串。
-
-### 标签处理规则
-- 标签内部的空格必须替换为下划线 `_`（如 `red eyes` → `red_eyes`）
-- 标签名内的括号必须用反斜杠转义（如 `momoko (momopoco)` → `momoko_\\(momopoco\\)`）
-- 权重括号（如 `(daito:1.2)`）保持原样，不转义
-- 括号内包含多个独立标签时，拆解为独立标签
-
-### XML 结构
-
-```xml
-<img>
- <character_1>
-  <n>角色名</n>
-  <gender>性别标签 (如 1girl)</gender>
-  <appearance>外貌特征 (发色, 瞳色, 身体特征等)</appearance>
-  <clothing>衣着 (具体服饰)</clothing>
-  <expression>表情</expression>
-  <action>动作</action>
-  <position>位置</position>
- </character_1>
-
- <!-- 若有多个角色，按 character_2, character_3 顺延 -->
-
- <general_tags>
-  <count>人数标签</count>
-  <style>画风标签（若用户未指定，默认 anime_style,realistic_shading）</style>
-  <background>背景标签</background>
-  <atmosphere>画面情绪、氛围标签</atmosphere>
-  <quality>very_aesthetic, masterpiece, no_text</quality>
-  <resolution>max_high_resolution</resolution>
-  <artist>画师标签</artist>
-  <objects>各种物品（包括武器、饰品等）</objects>
-  <other>其它标签</other>
- </general_tags>
-
- <caption>
-  将所有标签串联为一段流畅、详细的英文场景描述。包含光线、情绪、角色和背景。
-  不要在此处提及 style 或 quality 类词汇。
- </caption>
-</img>
-```
-
-将上述 XML 内容放入 xml_out 字符串，`<caption>` 内容的中文翻译放入 text_out。
-
-### 多人物规则（防特征混淆）
-
-如果用户提到了多个人物，必须严格遵循以下规则：
-
-1. **角色分组**：每个 character_N 块内连续排列该角色的所有专属属性（发型、瞳色、服装、体型、表情、动作），然后再切换到下一角色。
-2. **外观标签充分**：每个角色至少 5 个角色特征标签。可使用 get_related_tags 获得更多特征。
-3. **属性不交叉**：禁止将不同角色的同类属性交叉排列。不同角色的特征混淆是多人场景最常见的失败模式。
-4. **空间锚定**：在 `<position>` 和 `<caption>` 中明确每个角色的空间位置（如"左侧"、"右侧"、"前景"等）。
-5. **caption 角色锚定**：在 `<caption>` 中为每个角色写一句外观锚定短语，使用"[角色名] with [关键特征]"的句式，明确指出视觉归属。
-"""
-
-_ANIMA_OUTPUT_FORMAT = """
-## 输出格式要求
-
-你是一个专业的文生图提示词工程师。你的任务是接收用户对画面的需求描述，输出一份可直接用于 Anima 模型的提示词，并附上中文解释。
-
-最终以 JSON 的 xml_out 字符串返回标签块及英文自然语言段落，以 text_out 字符串返回中文解释。
-
-### 标签处理规则
-- 标签内部的下划线 `_`必须替换为空格（如 `red_eyes` → `red eyes`）
-- 标签名内的括号必须用反斜杠转义（如 `momoko (momopoco)` → `momoko \\(momopoco\\)`）
-- 标签和标签之间用一个逗号和一个空格链接。示例：`tag a, tag b, tag c`
-
-
-### 提示词撰写规则
-
-- 默认采用 Hybrid 混合结构（标签 + 自然语言）。仅当用户明确要求纯标签或纯自然语言时才切换。
-- 所有 tag 小写，单词间用空格分隔，仅 score_1 到 score_9 使用下划线。
-- 默认正向前缀：masterpiece, best quality, score_7, safe。在用户要求绘画现有人物时，禁止使用score_8、score_9等过强标签，以免过拟合导致人物特征丢失。
-- 质量词结束后换行
-- 艺术家 tag 必须以 @ 开头，例如 @nnn yryr。否则风格几乎不生效。 **最多使用3个艺术家标签。** 若有明确的主画师，可对其使用权重语法 `(@artist name:2)` 强调其风格主导地位。
-- 主体计数使用 1girl、1boy、1other、2girls 等标准写法。角色名与作品名小写，必要时用括号消歧。
-- 自然语言段落严格控制在 2 到 3 句英文，仅用于 tag 难以精确表达的内容：镜头角度、取景范围、光线方向与质感、调色、天气、氛围、背景环境、多角色动作与空间关系。
-- 自然语言段落与 tag 冲突时，自然语言的影响力更强。若用户指定了 close-up、upper body 等取景 tag，可对取景 tag 使用权重语法 `(upper body:2)` 来强化。
-- 权重控制：对于你认为重要，或者用户要求你强调的内容，可以使用 `(tag:2)` 的权重写法进行控制。权重取值范围为2~5。
-    如果用户给出的标签中含有1.2等较小的权重，请你把它放大到2~5区间内。
-- 提示词总长度严格控制在 3 段以内。过长的提示词会显著破坏画面结构。
-- 不要幻觉或编造不存在的 tag。若不确定某个 tag 是否存在，将该概念放入自然语言段落描述。
-- 安全分级：有 safe、 sensitive、nsfw 和 explicit 四个等级，根据用户的需求选择其中一个。
-- 如果用户没有描述，画面应该以人物为主体，近景，人物面向观众。如果用户有其它描述，则以用户描述为准。
-
-### 标签块结构规则
-
-采用 Anima 官方推荐的标签顺序，单人物与多人物遵循同一框架：
-
-**单人物**：
-`[quality/meta/safety], `
-`[1girl/1boy], [character name], [series], [@artist], [hair], [eyes], [clothing], [body/pose], [expression], [action], [background/atmosphere], [composition tags]`
-
-**多人物**（核心防串扰规则）：
-`[quality/meta/safety], `
-`[2girls / 1girl, 1boy], `
-然后为每个角色依次排列其专属属性：
-`[character_A name], [series_A], [A hair], [A eyes], [A clothing], [A body], [A expression],`
-`[character_B name], [series_B], [B hair], [B eyes], [B clothing], [B body], [B expression],`
-最后接共享标签：
-`[shared pose/action], [background], [atmosphere], [composition],[@artist]`
-
-### 多人物特征分离规则（最关键）
-
-Anima 模型在多人场景中极易发生特征混淆（头发颜色、服装、体型在角色间串扰）。必须严格遵守以下规则：
-
-1. **角色属性必须按角色分组排列**。同一角色的发型、瞳色、服装、体型等必须连续出现后再切换到下一角色。严禁将不同角色的同类属性交叉排列（如"blue hair, red hair, short hair, long hair"这种形式会让模型无法分辨哪个头发属于哪个角色）。属于不同角色的属性之间换行。
-2. **自然语言段落必须为每个角色写一句"外观锚定短语"**。使用 "CharacterName with [key features]..." 的句式，明确指出视觉归属。例如："Holo with long brown hair and wolf ears sits on the left, while Lawrence with short silver hair and a merchant\'s cloak stands on the right." 这比仅靠 tag 的防串扰效果强得多。
-3. **使用空间方位词分离角色**。在自然语言中明确 left/right/foreground/background，帮助模型建立空间锚点。
-4. **为关键区分特征使用权重语法**。当两个角色的某个特征容易混淆时（如同一场景中的蓝发角色和红发角色），对区分性 tag 使用权重：`(blue hair:2), (red hair:2)`。Anima 的 Qwen 文本编码器支持权重语法，但需要比 SDXL 更高的数值（建议 2.0~3.0）。
-5. **角色外观必须在 tag 块中充分描述**。Anima 官方文档明确指出："Name a character, then describe their basic appearance. This is extra important when prompting for multiple characters. If you just list off character names with no description of appearance, the model can get confused."
-6. **自然语言中不重复 tag 已覆盖的内容**。自然语言的目的是补充 tag 无法表达的：空间关系、互动动作、光影氛围、构图取景。角色的发型、瞳色、服装等细节交给 tag。
-7. **不得书写矛盾的人数标签**。在多人场景下，你应该删除属于每个人的 `1girl`、`1boy`标签，使用一个描述总体的`2girl` 或 `3girl`等标签即可。
-
-### 标签互斥规则（冲突检查）
-
-以下标签对**不可同时出现**。组装标签时必须逐项检查。
-
-#### 视角互斥
-
-| 标签A | 标签B | 原因 |
-|---|---|---|
-| `from front` | `from behind` | 物理矛盾 |
-| `from above` | `from below` | 物理矛盾 |
-| `looking at viewer` | `facing away` | 视线矛盾 |
-| `pov` | `full body` | POV 不可能看到自己全身 |
-| `close-up` | `full body` | 景别矛盾 |
-
-#### 身份互斥
-
-| 标签A | 标签B | 原因 |
-|---|---|---|
-| `solo` | `hetero` / `1boy` / `yuri` | 单人不存在互动 |
-| `sleeping` / `unconscious` | `looking at viewer` | 无意识不可能直视 |
-| `blindfold` | `heart-shaped pupils` / `rolling eyes` | 看不到眼睛 |
-
-#### 服装互斥
-
-| 标签A | 标签B | 原因 |
-|---|---|---|
-| `completely nude` | 任何具体服装标签 | 全裸不穿衣 |
-| `pantyhose` | `barefoot` | 穿了丝袜不可能光脚（除非 `torn pantyhose`） |
-| `blindfold` | `glasses` | 物理冲突 |
-| 内衣套装 (`cat lingerie`, `lace lingerie`, `babydoll`, `negligee`, `chemise` 等) | `no panties` / `bottomless` | 内衣套装隐含包含内裤，模型优先解析套装忽略暴露标签；需暴露时拆为单件（`cat bra` + `no panties`） |
-
-> **不互斥**：外衣/制服（`maid outfit`、`school uniform`、`bunny suit`、`sailor uniform` 等）与 `no panties` / `bottomless` 完全兼容。
-
-#### 动作互斥
-
-| 标签A | 标签B | 原因 |
-|---|---|---|
-| `standing sex` | `lying` / `on back` | 体位矛盾 |
-| `missionary` | `doggystyle` | 不可能同时两个体位 |
-| `cowgirl position` | `prone bone` | 体位矛盾 |
-| `fellatio` | `cunnilingus`（同一人执行） | 嘴只有一张 |
-
-#### 细节标签过度（关键）
-
-同一身体部位同时堆叠多个细节标签会导致模型过度渲染，产生畸形。**每部位细节标签 ≤2 个，且不能互斥。**
-
-| 部位 | 矛盾组合 | 原因 |
-|---|---|---|
-| 脚趾 | `spread toes` + `toe scrunch` / `toes curling` | 舒展 vs 蜷缩 |
-| 脚趾 | `spread toes` + `feet together` | 分趾需要空间，合拢则压缩 |
-| 手指 | `spread fingers` + `clenched fist` / `gripping` | 张开 vs 握拳 |
-| 胸部 | `bouncing breasts` + `breasts squeeze together` | 弹跳 vs 挤压 |
-| 嘴巴 | `open mouth` + `clenched teeth` / `closed mouth` | 张嘴 vs 闭嘴 |
-| 眼睛 | `rolling eyes` + `looking at viewer` | 翻白眼 vs 直视 |
-| 腿部 | `spread legs` + `legs together` | 分开 vs 并拢 |
-| 足部整体 | 3 个以上足部标签（如 `foot focus` + `footjob` + `toe scrunch` + `spread toes`） | 过度细化导致畸形 |
-
-**原则**：同一部位的状态标签可以多个，但不能互斥。`barefoot` + `feet focus` + `soles` + `toe scrunch` 四个兼容标签没问题；`spread toes` + `toe scrunch` 两个就矛盾。
-
-### 最终自检清单
-
-prompt 组装完成后，提交前必须逐项自检，全部通过才可输出：
-
-| # | 检查项 | 通过标准 |
-|---|---|---|
-| 1 | **人数一致性** | `count/gender` 标签数量与实际角色数一致，无 `1boy, 2boys` 等矛盾 |
-| 2 | **互斥冲突** | 对照上方互斥表，无视角/身份/服装/动作/细节标签矛盾 |
-| 3 | **重复标签** | 同一标签不出现两次（强调靠权重语法，不靠重复） |
-| 4 | **场景合理性** | 场景标签与动作标签物理兼容（如 `underwater` 不能配 `cigarette`） |
-| 5 | **细节标签上限** | 同一身体部位细节标签 ≤2 个，且无互斥组合 |
-| 6 | **标签总数** | 单人 16-30 标签，双人 22-38，复杂多人 30-48 |
-| 7 | **风格一致性** | 服装、场景、氛围不出现跨世界观矛盾（如 `hanfu` 站在 `cyberpunk city`） |
-
-**自检流程**：组装完 → 逐项打勾 → 有冲突回退修改 → 全部通过才提交。
-
-### 中文解释撰写规则
-
-- 采用分点结构，每点对应一个设计决策。
-- 解释覆盖：为何选择当前的提示词架构、关键 tag 的作用、自然语言段落各句的功能。多人物时必须解释角色分组策略。
-- 必须包括对提示词中自然语言部分的完整翻译。
-- 语言保持中立、客观、技术化，不使用感叹号、表情符号或情绪化措辞。
-- 避免冗长背景介绍，只解释本次提示词中实际出现的元素。
-- 不要在两个部分之外输出任何内容。不要说明你的思考过程。
-"""
-
-
-
-_MOSS_OUTPUT_FORMAT = """
-## MOSS 输出格式要求
-
-### 提示词规则
-
-遵循用户对 caption 或 Layout 的明确要求。否则，对于普通场景、照片和插画，使用 caption。当特定文本放置、海报、多个面板或受控的物体关系会受益于边界框时，使用 Layout。详细的图像并不自动需要 Layout。
-关于 caption 或 layout 的详细说明，请调用 get_moss_image_format 工具查看。
-保留用户的主体、数量、关系、媒介、风格、排除项和预期可见文字。自行解决普通的创意空白；
-本模型的 captain 模式支持 Danbooru 标签列表（tag 串）式提示词，也支持自然语言式提示词。你也可以将两者混合使用。
-为了在 tag 串中实现最好的性能, 推荐使用 Quality -> Score -> Meta -> Year -> Character -> Series -> Artist -> General 的顺序构造.示例：
-> best quality, highres, hatsune miku, vocaloid, @foo bar, 1girl, blue hair
-你应当在 caption 或 Layout 的自然语言部分中尽可能使用已确认的 Danbooru 标签词汇。对于标签无法描述的内容，也可以用自然语言进行描述。
-
-### 工具调用规则
-
-有工具可用时先调用 get_moss_image_format 获取规范；
-Layout 使用原始像素 abs/xyxy 草稿坐标，禁止自行换算。
-按 get_moss_image_format 返回的 MOSS 规范组织 caption 或 Layout 草稿。
-所有最终提示词（包括普通 caption）都必须在现有工具循环中调用 compile_moss_prompt 编译。
-编译失败时修正草稿并重试；禁止跳过编译或交付错误信息。
-
-### 输出格式规则
-
-最终以 JSON 的 xml_out 字符串返回提示词，以 text_out 字符串返回中文解释。
-成功后 xml_out 必须逐字等于最近一次 compile_moss_prompt 的返回值，禁止再改写。
-最终 xml_out 必须是可直接用于 MOSS 的提示词字符串，不是等待编排器编译的草稿包装。
-text_out 说明实际采用的标签与设计，并完整翻译英文自然语言；需要画布尺寸时也在这里说明。
-
-"""
-
-
 # ── Low 模式组装提示词 ──────────────────────────────────────────────
 
 LOW_ASSEMBLY_PROMPT = """
@@ -433,17 +198,17 @@ def get_agent_system_prompt(mode, config, max_rounds=None, model_name=None, enab
     Returns: (system_prompt, fewshot_user, fewshot_assistant)
     """
     if mode == "MOSS":
-        output_format = _MOSS_OUTPUT_FORMAT
+        output_format = get_format_spec(mode)
         fewshot_user = config.get("fewshot_user_moss", "")
         fewshot_assistant = config.get("fewshot_assistant_moss", "")
         artists_anima = ""
     elif mode == "Anima":
-        output_format = _ANIMA_OUTPUT_FORMAT
+        output_format = get_format_spec(mode)
         fewshot_user = config.get("fewshot_user_anima", "")
         fewshot_assistant = config.get("fewshot_assistant_anima", "")
         artists_anima = ""
     else:
-        output_format = _NEWBIE_OUTPUT_FORMAT
+        output_format = get_format_spec(mode)
         fewshot_user = config.get("fewshot_user", "")
         fewshot_assistant = config.get("fewshot_assistant", "")
         artists_anima = ""
@@ -464,7 +229,7 @@ def get_agent_system_prompt(mode, config, max_rounds=None, model_name=None, enab
         output_format = """
 ## 动态格式规范
 
-编排器会通过本轮格式工具返回值或上下文中的缓存规范提供最终输出契约。
+编排器会通过本轮格式工具返回值或上下文中的缓存规范提供模型输入提示词的内容与结构规范。
 正常情况下，规范可用前不得输出最终结果，已有缓存规范时不得重复获取。
 若格式工具失败且编排器明确要求直接收尾，则基于上下文中已有的模式结构尽力输出，不再重试工具。
 """
@@ -476,9 +241,6 @@ def get_agent_system_prompt(mode, config, max_rounds=None, model_name=None, enab
         round_budget_section=round_budget_section,
     )
 
-    if mode == "MOSS" and max_rounds:
-        system_content += "\n\n" + _MOSS_OUTPUT_FORMAT
-
     if enable_web_search:
         system_content += "\n\n" + _WEB_SEARCH_PROMPT.strip()
 
@@ -489,6 +251,9 @@ def get_agent_system_prompt(mode, config, max_rounds=None, model_name=None, enab
     if artists_anima:
         system_content = f"{system_content}\n\n{artists_anima}"
 
+    additions = get_system_additions(mode, config)
+    if additions:
+        system_content += "\n\n" + additions
     system_content += "\n\n" + output_instruction(mode)
     fewshot_assistant = normalize_fewshot(fewshot_assistant, mode)
     return system_content, fewshot_user, fewshot_assistant
