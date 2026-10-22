@@ -3,6 +3,7 @@
 import json
 
 from prompt_agent.output_contract import output_instruction
+from prompt_agent.moss_layout import layout_search_text
 from prompt_agent.prompt_formats import get_format_spec, get_system_additions
 from prompt_agent.agent_loop import complete_moss_output
 from prompt_agent import utils
@@ -234,9 +235,10 @@ def run_low_effort(agent, user_text, image=None):
         if pbar:
             pbar.update_absolute(step)
 
-    user_tags, dimensions = agent._rewrite_query(user_text, image=image)
+    search_text = layout_search_text(user_text, getattr(agent, "_moss_layout", None))
+    user_tags, dimensions = agent._rewrite_query(search_text, image=image)
     if not dimensions:
-        dimensions = [user_text]
+        dimensions = [search_text]
         _log("查询重写未返回结果，使用原始输入")
     provided_list, _ = agent._collect_provided_tags(user_text, user_tags)
     user_tags = ", ".join(provided_list)

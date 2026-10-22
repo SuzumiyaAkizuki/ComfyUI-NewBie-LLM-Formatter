@@ -141,6 +141,7 @@ class LLM_Prompt_Formatter:
                 "force_full_agent_run": ("BOOLEAN", {"default": False}),
             },
             "optional": {
+                "layout": ("MOSS_LAYOUT",),
                 "image": ("IMAGE",),
                 "enable_web_search": ("BOOLEAN", {"default": False, "tooltip": "启用 Tavily 联网搜索，仅 Medium/High 生效；请先在 LPF_config.json 填写 tavily_api_key。"}),
             },
@@ -297,7 +298,11 @@ class LLM_Prompt_Formatter:
 
     # ── 主方法 ─────────────────────────────────────────────────────────
 
-    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, force_full_agent_run=False, image=None, unique_id=None, enable_web_search=False):
+    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, force_full_agent_run=False, image=None, unique_id=None, enable_web_search=False, layout=None):
+        if layout is not None:
+            from prompt_agent.moss_layout import prepare_layout, append_layout_input
+            layout = prepare_layout(layout, mode)
+            user_text = append_layout_input(user_text, layout)
         config = load_api_config()
         final_key, final_url = self._resolve_credentials(config, api_key, api_url)
 
@@ -311,6 +316,7 @@ class LLM_Prompt_Formatter:
                     unique_id=unique_id,
                     enable_web_search=enable_web_search,
                 )
+                agent._moss_layout = layout
                 return agent.run(user_text, image=image, force_full_run=force_full_agent_run)
             except comfy.model_management.InterruptProcessingException:
                 raise
@@ -368,6 +374,7 @@ class LLM_Prompt_Formatter:
                 from prompt_agent.agent_loop import complete_moss_output
                 agent = PromptAgent(final_key, final_url, model_name, mode, thinking,
                                     config, effort="Close", unique_id=unique_id)
+                agent._moss_layout = layout
                 content = complete_moss_output(agent, messages_list)
                 return self._parse_normal_output(content, is_anima, gemma_prompt, mode=mode)
 

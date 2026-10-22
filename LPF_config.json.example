@@ -434,6 +434,91 @@
       "mode": "MOSS",
       "artist": "",
       "style": "painterly anime illustration, impasto, broad palette-knife color planes, thick opaque paint ridges following the direction of each form, ultramarine shadows contrasted with warm apricot and cadmium-yellow highlights, angular overlapping strokes, selectively simplified contours, small precise facial details surrounded by bold broken color masses, exposed canvas between a few strokes, strong value grouping"
+    },
+    "铜版蚀刻：细密排线": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "etched anime illustration, monochrome, crosshatching, fine dark-brown engraved lines on warm ivory paper, curved parallel hatching describing volume, tightly woven crosshatching in deep shadows, clean unprinted highlights, delicate tapered facial contours, intricate material details, varied line density rather than smooth gradients, broad quiet paper areas balancing dense engraved passages"
+    },
+    "彩纸马赛克：碎片色彩": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "mosaic-inspired anime illustration, irregular flat color fragments assembled into clear flowing silhouettes, turquoise and terracotta balanced by cream and deep indigo, large polygonal pieces across facial planes, smaller rhythmic fragments around hair and clothing edges, narrow dark seams between selected pieces, matte colored surfaces, strong light-dark grouping, simplified expressive eyes, crisp tessellated geometry"
+    },
+    "早期数字涂绘：锐利像素笔触": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "anime illustration, oekaki, thin slightly jagged digital pen contours, clean flat base colors with rough-edged shadow patches, visible economical brush marks, muted teal and warm grey balanced by vivid orange accents, sharp pixel-sized highlight strokes, loosely drawn interior details, confident expressive facial lines, broad uncluttered color areas, spontaneous early digital painting aesthetic"
+    },
+    "极彩锐线高反差平涂风": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "expressive contemporary anime illustration, anime_coloring, saturated, high_contrast, colored_lineart, electric cyan and hot magenta colliding with scarlet and acid-yellow accents, deep violet-black shadow masses, bold cel-shaded color planes, fine multicolored interior lines, sharp ribbon-like hair highlights, intricate jewel-colored irises, energetic sweeping curves and angular silhouettes, dense decorative detail surrounding clean facial planes, selective brilliant white accents, crisp digital finish"
+    },
+    "细腻彩线通透微渐变风": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "refined digital anime illustration, colored_lineart, anime_coloring, slender tapered contours tinted by local colors, clean cel-shadow shapes with small selective gradient transitions, subtle hue shifts along light-shadow boundaries, warm coral skin tones against cool lavender midtones, narrow saturated accents within darker forms, layered translucent-looking iris colors, finely separated hair tips, restrained glossy highlights, clearly readable silhouettes, polished detailed focal areas"
+    },
+    "低饱和几何明暗块面风": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "stylized digital anime illustration, anime_coloring, muted_colors, thin organic contours merging into local color shapes, broad opaque midtone planes, decisive angular cel shadows, deep teal and charcoal-violet darks, warm natural skin tones, restrained ivory highlights, sculpted hair groups, fabric folds described by large interlocking shadow shapes, minimal surface detail, expressive simplified facial features, strong value structure, clean matte digital rendering"
+    },
+    "暗调霓虹边缘光高反差风": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "cinematic digital anime illustration, anime_coloring, high_contrast, deep indigo shadows, localized cyan side light and hot pink rim accents, natural local colors retained across the midtones, crisp shadow boundaries, narrow colored reflections on selected surfaces, sharp facial contours, clearly defined dark pupils, small bright specular highlights, dark hair broken by thin luminous color bands, layered background silhouettes, controlled light intensity, solid readable blacks"
+    },
+    "精致平滑渐变清透数码风": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "polished digital anime illustration, delicate clean linework, smooth localized color gradients bounded by crisp cel-shadow shapes, luminous midtones with solid dark anchors, warm peach skin with subtle cool reflected light, satin-like hair shading organized into broad locks, narrow controlled highlights, layered clear irises, softly modeled cheeks with sharply defined eyes and lashes, restrained material-specific reflections, clean color separation, precise digital edges"
+    },
+    "高反差锐利粗线几何平涂风": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "graphic fashion anime illustration, anime_coloring, high_contrast, expressive tapered black contours, elongated sweeping shapes interrupted by sharp angular cuts, broad clean color planes, deep black and ivory balanced by selective vivid accent colors, long ribbon-like hair silhouettes, minimal but decisive facial marks, faceted fabric shadows, thin geometric interior accents, asymmetric visual balance, crisp opaque digital fills, bold readable negative space"
+    },
+    "清新明快简练平涂风": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "lively slice-of-life anime illustration, anime_coloring, clean expressive linework with modest line-weight variation, natural cheerful colors, broad opaque base fills, simple single-layer cel shadows, warm peach skin, clearly defined eyes with economical highlights, rounded grouped hair shapes, a few loose expressive strands, readable clothing folds, restrained daylight accents, simplified coherent background colors, fresh uncluttered digital rendering"
+    },
+    "蔚蓝档案平涂风": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "clean modern anime character illustration, anime_coloring, delicate thin grey-violet contours, soft fresh local colors, smooth opaque base fills, simple two-step cel shading, pale cool shadows balanced by warm peach skin, restrained blush, clear luminous irises with dark pupils and small sharp reflections, neatly grouped hair strands, small clean hair highlights, economical fabric-fold shadows, selective deep navy accents, bright neutral daylight, broad uncluttered color areas"
+    },
+    "轻巧现代无描边色块": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "lineless digital anime illustration, no_lineart, clean opaque color shapes, silhouettes defined by adjacent hues and values, broad curved forms with selective angular cuts, minimal interior marks reserved for facial features and essential folds, compact hard-edged shadow patches, balanced midtone colors with small vivid accents, clearly defined eyes, precise shape intersections, smooth untextured surfaces, playful economical shape design"
+    },
+    "潇洒松动数字速写": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "expressive digital anime sketch, sketch, confident broken pen strokes with varied pressure, selective overlapping contour lines, broad clean base-color patches, loosely placed angular shadows, precisely resolved eyes and mouth, hair and clothing edges trailing into unfinished strokes, sparse directional hatching, small saturated color accents, strong readable silhouette, deliberate contrast between finished focal details and open peripheral marks"
+    },
+    "细密光洁恋爱CG": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "visual novel cg, finely rendered digital anime illustration, precise thin contours, densely layered hair strands organized into clear locks, smooth local gradients beneath crisp cast shadows, detailed luminous irises with dark upper rims, warm skin midtones and restrained blush, carefully shaded fabric gathers, narrow glossy hair reflections, subtle contact shadows at overlapping forms, distinct material finishes, polished clear character rendering"
+    },
+    "戏剧性神秘暗剪影": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "dramatic low-key anime illustration, high_contrast, large connected near-black shadow shapes, selective hard-edged light revealing only a few facial and clothing planes, thin controlled silhouette highlights, warm illuminated skin against cool dark midtones, minimal reflected light, fine contours disappearing naturally into shadow, small sharply defined eye reflections, sparse interior detail, strong asymmetrical light-dark composition"
+    },
+    "圆润简洁数码萌系": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "cute graphic anime illustration, rounded compact shape language, smooth slightly weighted outer contours, sparse fine interior lines, simplified rounded hair locks, large clear eyes with economical iris detail, small expressive mouth, clean opaque local colors, tiny single-step shadow patches, restrained cheek accents, broad uncluttered facial planes, crisp digital edges, charming readable silhouettes and expressive gestures"
+    },
+    "雕塑力量感半厚涂": {
+      "mode": "MOSS",
+      "artist": "",
+      "style": "semi-painted digital anime illustration, sculptural planar rendering, broad opaque brush-shaped color planes, hard-edged shadows alternating with a few short blended transitions, selective contour lines at structural overlaps, compressed fine detail, strong contact shadows, matte skin shading, restrained metallic reflections, angular hair masses with narrow directional highlights, clear warm-cool plane changes, sharply resolved facial features, solid dimensional forms"
     }
   }
 }

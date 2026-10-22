@@ -43,6 +43,11 @@ def complete_moss_output(agent, messages, content=None):
         compiled = getattr(agent, "_moss_compiled_prompt", None)
         if not isinstance(compiled, str) or not compiled.strip():
             raise ValueError("尚未成功调用 compile_moss_prompt")
+        layout = getattr(agent, "_moss_layout", None)
+        if layout is not None:
+            from prompt_agent.moss_layout import guard_compilation
+            draft = guard_compilation(layout, getattr(agent, "_moss_compiled_draft", None))
+            explanation += f"\n\n画布尺寸：{draft['width']} × {draft['height']}；生成工作流请使用相同尺寸。"
         return json.dumps({"xml_out": compiled, "text_out": explanation}, ensure_ascii=False)
 
     if content is not None:

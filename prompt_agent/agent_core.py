@@ -464,6 +464,8 @@ class PromptAgent:
         raise RuntimeError("unreachable")
 
     def _rewrite_query(self, question, image=None):
+        from prompt_agent.moss_layout import layout_search_text
+        question = layout_search_text(question, getattr(self, "_moss_layout", None))
         _log_section("查询重写")
         prompt = QUERY_REWRITE_PROMPT.format(question=question)
         user_content = prompt
@@ -557,11 +559,21 @@ class PromptAgent:
         if name in {"get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"}:
             from prompt_agent.tools import execute_moss_tool
             if name == "compile_moss_prompt":
-                self._moss_compiled_prompt = None
-            result = execute_moss_tool(name, args)
-            if name == "compile_moss_prompt":
-                self._moss_compiled_prompt = result
-            return result
+                from threading import Lock
+                # Several tool calls can arrive in one parallel Agent round.
+                # Keep the authoritative prompt and its source draft paired.
+                with self.__dict__.setdefault("_moss_compile_lock", Lock()):
+                    self._moss_compiled_prompt = None
+                    self._moss_compiled_draft = None
+                    layout = getattr(self, "_moss_layout", None)
+                    if layout is not None:
+                        from prompt_agent.moss_layout import guard_compilation
+                        args = {**args, "draft": guard_compilation(layout, args.get("draft"))}
+                    result = execute_moss_tool(name, args)
+                    self._moss_compiled_prompt = result
+                    self._moss_compiled_draft = args.get("draft")
+                    return result
+            return execute_moss_tool(name, args)
         if name == "web_search":
             if not self.web_search_enabled:
                 return json.dumps({"error": "Web search is disabled for this run."})
@@ -817,6 +829,8 @@ class PromptAgent:
         return batch_search_tags(self, dimensions)
 
     def _explore_related_tags(self, all_tag_names, user_text):
+        from prompt_agent.moss_layout import layout_search_text
+        user_text = layout_search_text(user_text, getattr(self, "_moss_layout", None))
         return explore_related_tags(self, all_tag_names, user_text)
 
     def _assemble_low_output(self, all_tag_names, tag_cn_map, user_text, user_tags, image):
@@ -834,6 +848,7 @@ class PromptAgent:
 
     def run(self, user_text, image=None, force_full_run=False):
         self._moss_compiled_prompt = None
+        self._moss_compiled_draft = None
         self._trace(
             "start",
             status="running",
@@ -975,6 +990,9 @@ class PromptAgent:
         """基线判定（所有 effort 通用）。返回 (decision, edit)：
         decision ∈ {"reuse", "continue", "cold"}；continue 时附带 edit。
         """
+        from prompt_agent.moss_layout import layout_fingerprint
+        if baseline and baseline.get("layout_fingerprint") != layout_fingerprint(getattr(self, "_moss_layout", None)):
+            return ("cold", None)
         if not (baseline
                 and baseline.get("mode") == self.mode
                 and baseline.get("web_search_enabled", False) == self.web_search_enabled
@@ -1008,6 +1026,8 @@ class PromptAgent:
         """合并确定性抽取（正则）与查询重写的 [已有] 标记，返回 (provided_list, provided_norm)。
         确定性抽取不依赖重写 LLM，确保 LLM 漏标时已提供标签列表仍完整。
         """
+        from prompt_agent.moss_layout import layout_search_text
+        user_text = layout_search_text(user_text, getattr(self, "_moss_layout", None))
         provided_list = utils.extract_provided_tags(user_text)
         provided_norm = {utils.normalize_tag(t) for t in provided_list}
         if rewrite_user_tags:
@@ -1157,7 +1177,9 @@ class PromptAgent:
         if not content or not content.strip():
             return
         try:
+            from prompt_agent.moss_layout import layout_fingerprint
             get_baseline_store().put(self.unique_id, {
+                "layout_fingerprint": layout_fingerprint(getattr(self, "_moss_layout", None)),
                 "norm_input": normalize_prompt(user_text),
                 "raw_input": user_text,
                 "output": content,
