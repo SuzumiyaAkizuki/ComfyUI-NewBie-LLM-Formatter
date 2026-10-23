@@ -5,6 +5,7 @@ LLM_Prompt_Formatter 的 Agent 编排入口与兼容门面。
 """
 
 from __future__ import annotations
+from prompt_agent.execution_context import AgentCancelled, check_interrupted
 
 import json
 import re
@@ -143,6 +144,9 @@ class PromptAgent:
         )
 
     def _trace(self, event, status="info", title="", summary="", details=None):
+        if getattr(self, "_trace_sink", None):
+            self._trace_sink(event=event, status=status, title=title, summary=summary)
+            return
         emit_agent_trace(
             self.unique_id,
             event,
@@ -193,11 +197,15 @@ class PromptAgent:
                 break
             _log_section(f"模型思考 · {purpose} · {field}")
             print(reasoning, file=sys.stderr, flush=True)
+            if getattr(self, "_standalone", False):
+                self._trace("reasoning", title=f"模型思考 · {purpose}", summary=reasoning)
             displayed = True
         inline = self._strip_inline_thinking(message)
         if inline and not displayed:
             _log_section(f"模型思考 · {purpose} · <think>")
             print(inline, file=sys.stderr, flush=True)
+            if getattr(self, "_standalone", False):
+                self._trace("reasoning", title=f"模型思考 · {purpose}", summary=inline)
             displayed = True
         if not displayed:
             _log_warn(f"{purpose} 已启用思考，但模型/网关未返回可显示的思考内容")
@@ -219,9 +227,11 @@ class PromptAgent:
         except StopIteration:
             first_chunk = None
         except Exception as error:
+            self._raise_if_interrupted(error)
             raise _StreamUnavailableError(str(error)) from error
 
         for chunk in chain(() if first_chunk is None else (first_chunk,), iterator):
+            check_interrupted(self)
             chunk_usage = getattr(chunk, "usage", None)
             if chunk_usage is not None:
                 usage = chunk_usage
@@ -250,6 +260,8 @@ class PromptAgent:
                     _log_section(f"模型思考 · {purpose} · {field}")
                 if display_field == field:
                     print(part, end="", file=sys.stderr, flush=True)
+                    if getattr(self, "_standalone", False):
+                        self._trace("reasoning", title=f"模型思考 · {purpose}", summary=part)
                     displayed_any = True
 
             details = getattr(delta, "reasoning_details", None)
@@ -262,6 +274,8 @@ class PromptAgent:
                     _log_section(f"模型思考 · {purpose} · reasoning_details")
                 if detail_text and display_field == "reasoning_details":
                     print(detail_text, end="", file=sys.stderr, flush=True)
+                    if getattr(self, "_standalone", False):
+                        self._trace("reasoning", title=f"模型思考 · {purpose}", summary=detail_text)
                     displayed_any = True
 
             for tool_delta in getattr(delta, "tool_calls", None) or []:
@@ -321,6 +335,8 @@ class PromptAgent:
         if inline and not displayed_any:
             _log_section(f"模型思考 · {purpose} · <think>")
             print(inline, file=sys.stderr, flush=True)
+            if getattr(self, "_standalone", False):
+                self._trace("reasoning", title=f"模型思考 · {purpose}", summary=inline)
             displayed_any = True
         if not displayed_any:
             _log_warn(f"{purpose} 已启用思考，但模型/网关未返回可显示的思考内容")
@@ -345,12 +361,19 @@ class PromptAgent:
 
     @staticmethod
     def _raise_if_interrupted(error):
+        if isinstance(error, AgentCancelled):
+            raise error
         if (_COMFY_AVAILABLE
                 and isinstance(error, comfy.model_management.InterruptProcessingException)):
             raise error
 
     def _create_completion_once(self, *, purpose="LLM", **kwargs):
         """执行一次逻辑请求，并保留 thinking 流式到非流式的兼容回退。"""
+        check_interrupted(self)
+        if getattr(self, "_standalone", False):
+            self._trace("request", status="running", title="模型思考中" if self.thinking else "请求模型", summary=purpose)
+        if getattr(self, "_standalone", False):
+            self._trace("request", status="running", title="模型思考中" if self.thinking else "请求模型", summary=purpose)
         if not getattr(self, "thinking", False):
             return self.llm.chat.completions.create(**kwargs)
 
@@ -370,6 +393,7 @@ class PromptAgent:
                 f"{purpose} 流式请求不可用，回退非流式: "
                 f"{format_agent_error_summary(stream_error)}{log_hint}"
             )
+            check_interrupted(self)
             response = self.llm.chat.completions.create(**kwargs)
             self._log_non_stream_reasoning(response, purpose)
             return response
@@ -394,6 +418,7 @@ class PromptAgent:
                 f"{purpose} 流式响应不可用，回退非流式: "
                 f"{format_agent_error_summary(stream_error)}{log_hint}"
             )
+            check_interrupted(self)
             response = self.llm.chat.completions.create(**kwargs)
             self._log_non_stream_reasoning(response, purpose)
             return response
@@ -409,8 +434,7 @@ class PromptAgent:
         log_path = None
         max_attempts = len(_COMPLETION_RETRY_DELAYS) + 1
         for attempt in range(1, max_attempts + 1):
-            if _COMFY_AVAILABLE:
-                comfy.model_management.throw_exception_if_processing_interrupted()
+            check_interrupted(self)
             try:
                 return self._create_completion_once(purpose=purpose, **kwargs)
             except Exception as error:
@@ -459,7 +483,11 @@ class PromptAgent:
                         "log_path": log_path,
                     },
                 )
-                time.sleep(delay)
+                if getattr(self, "_cancel_event", None) is not None:
+                    self._cancel_event.wait(delay)
+                    check_interrupted(self)
+                else:
+                    time.sleep(delay)
 
         raise RuntimeError("unreachable")
 
@@ -556,6 +584,7 @@ class PromptAgent:
         return tools
 
     def _execute_tool(self, name, args):
+        check_interrupted(self)
         if name in {"get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"}:
             from prompt_agent.tools import execute_moss_tool
             if name == "compile_moss_prompt":
@@ -569,7 +598,17 @@ class PromptAgent:
                     if layout is not None:
                         from prompt_agent.moss_layout import guard_compilation
                         args = {**args, "draft": guard_compilation(layout, args.get("draft"))}
+                    if getattr(self, "_moss_canvas", None):
+                        from prompt_agent.moss_layout import validate_draft
+                        draft = validate_draft(args.get("draft"))
+                        if (draft["width"], draft["height"]) != self._moss_canvas:
+                            raise ValueError("必须生成 Layout，并保持用户画布宽高")
+                        args = {**args, "draft": draft}
+                    check_interrupted(self)
                     result = execute_moss_tool(name, args)
+                    if layout is not None:
+                        from prompt_agent.moss_layout import guard_compiled_output
+                        guard_compiled_output(layout, result)
                     self._moss_compiled_prompt = result
                     self._moss_compiled_draft = args.get("draft")
                     return result
@@ -633,6 +672,8 @@ class PromptAgent:
             return json.dumps({"error": f"未知工具: {name}"}, ensure_ascii=False)
 
     def _log_tool_call(self, name, args):
+        if getattr(self, "_standalone", False):
+            self._trace("tool", status="running", title=name, summary=json.dumps(args, ensure_ascii=False)[:2000])
         if name == "search_tags":
             query_str = args.get("query", "")
             mode = args.get("search_mode", "full_scene")
@@ -668,6 +709,8 @@ class PromptAgent:
             _log(f"  > 调用工具：{name}", _C.GREEN)
 
     def _log_tool_result(self, name, result_str):
+        if getattr(self, "_standalone", False):
+            self._trace("tool_result", title=name, summary=f"工具已返回 · {len(result_str)} 字符")
         if name in ("get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"):
             _log(f"    MOSS 工具返回 ({len(result_str)} chars)", _C.GREEN)
             return
@@ -847,6 +890,7 @@ class PromptAgent:
         return force_final_output(self, messages)
 
     def run(self, user_text, image=None, force_full_run=False):
+        check_interrupted(self)
         self._moss_compiled_prompt = None
         self._moss_compiled_draft = None
         self._trace(
@@ -897,6 +941,8 @@ class PromptAgent:
                 summary="零调用复用上次输出",
                 details={"path": "reuse"},
             )
+            self._moss_compiled_draft = baseline.get("compiled_draft")
+            self._moss_compiled_prompt = baseline.get("compiled_prompt")
             return self._parse_output(baseline["output"])
 
         # Low effort：流水线冷跑 / 增量修订续写
@@ -991,6 +1037,11 @@ class PromptAgent:
         decision ∈ {"reuse", "continue", "cold"}；continue 时附带 edit。
         """
         from prompt_agent.moss_layout import layout_fingerprint
+        if baseline and baseline.get("layout_run_context") != getattr(self, "_layout_run_context", None):
+            return ("cold", None)
+        if baseline and (baseline.get("moss_canvas") != getattr(self, "_moss_canvas", None)
+                         or (getattr(self, "_standalone", False) and not baseline.get("compiled_draft"))):
+            return ("cold", None)
         if baseline and baseline.get("layout_fingerprint") != layout_fingerprint(getattr(self, "_moss_layout", None)):
             return ("cold", None)
         if not (baseline
@@ -1180,6 +1231,10 @@ class PromptAgent:
             from prompt_agent.moss_layout import layout_fingerprint
             get_baseline_store().put(self.unique_id, {
                 "layout_fingerprint": layout_fingerprint(getattr(self, "_moss_layout", None)),
+                "moss_canvas": getattr(self, "_moss_canvas", None),
+                "layout_run_context": getattr(self, "_layout_run_context", None),
+                "compiled_draft": getattr(self, "_moss_compiled_draft", None),
+                "compiled_prompt": getattr(self, "_moss_compiled_prompt", None),
                 "norm_input": normalize_prompt(user_text),
                 "raw_input": user_text,
                 "output": content,

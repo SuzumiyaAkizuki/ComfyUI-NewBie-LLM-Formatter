@@ -1,5 +1,8 @@
 import { app } from "../../scripts/app.js";
-import { TYPES, emptyState, readState, validDimension, validBox, errorsFor, resizeCanvas, arrange, History, newId } from "./moss_layout_model.js";
+import { api } from "../../scripts/api.js";
+import { createAgentPanel } from "./moss_layout_agent.js";
+import { migrateLayoutGraph } from "./moss_layout_ports.js";
+import { TYPES, emptyState, readState, validDimension, validBox, errorsFor, resizeCanvas, arrange, History, newId, applyLayoutResult, contentKey } from "./moss_layout_model.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const COLORS = { object: "#ecc078", character: "#91c6fa", text: "#a7d5ac" };
@@ -7,10 +10,18 @@ const css = `
 .moss-editor { color:var(--fg-color,#e4e4e7); background:var(--comfy-menu-bg,#242428); font:13px/1.45 system-ui,sans-serif; padding:12px; box-sizing:border-box; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; color-scheme:dark; container-type:inline-size; }
 .moss-editor * { box-sizing:border-box; }
 .moss-body { display:flex; flex-direction:column; height:100%; min-height:0; }
-.moss-workspace { display:grid; grid-template-columns:minmax(0,1fr) clamp(240px,30%,360px); gap:16px; flex:1; min-height:0; min-width:0; }
+.moss-workspace { display:grid; grid-template-columns:minmax(0,1fr) 16px clamp(230px,30%,360px); flex:1; min-height:0; min-width:0; }
 .moss-canvas-pane { display:flex; flex-direction:column; min-height:0; min-width:0; }
-.moss-stage-wrap { display:flex; flex:1; min-height:0; min-width:0; overflow:hidden; }
-.moss-inspector { min-height:0; min-width:0; overflow:auto; overscroll-behavior:contain; padding-left:16px; padding-right:4px; border-left:1px solid var(--border-color,#626269); scrollbar-width:thin; scrollbar-color:var(--border-color,#626269) transparent; }
+.moss-stage-wrap { display:flex; flex:1; min-height:0; min-width:0; overflow:hidden; position:relative; }
+.moss-runtime-log { position:absolute; inset:0; z-index:1; padding:16px; display:flex; flex-direction:column; background:var(--comfy-menu-bg,#242428); border:1px solid var(--border-color,#626269); }
+.moss-runtime-log h3 { margin:0 0 12px; font:600 14px/1.5 system-ui,sans-serif; }
+.moss-runtime-log pre { margin:0; flex:1; min-height:0; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.65 system-ui,sans-serif; color:var(--fg-color,#e4e4e7); user-select:text; scrollbar-width:thin; }
+.moss-inspector { min-height:0; min-width:0; overflow:auto; overscroll-behavior:contain; padding-left:8px; padding-right:4px; scrollbar-width:thin; scrollbar-color:var(--border-color,#626269) transparent; }
+.moss-splitter { cursor:col-resize; position:relative; touch-action:none; user-select:none; border-radius:3px; }
+.moss-splitter::before { content:""; position:absolute; top:0; bottom:0; width:1px; left:50%; background:var(--border-color,#626269); }
+.moss-splitter::after { content:""; position:absolute; top:calc(50% - 14px); left:calc(50% - 2px); width:5px; height:28px; border-left:1px solid #b9bac1; border-right:1px solid #b9bac1; }
+.moss-splitter:hover::before,.moss-splitter[data-dragging=true]::before { background:#91c6fa; width:2px; }
+.moss-splitter:focus-visible { outline:2px solid #91c6fa; outline-offset:-2px; }
 .moss-section-title { font-weight:600; margin:0 0 8px; }
 .moss-selection-hint { margin:12px 0; color:var(--descrip-text,#b9bac1); }
 .moss-editor button,.moss-editor input,.moss-editor select,.moss-editor textarea { font:inherit; color:var(--input-text,#eee); background:var(--comfy-input-bg,#34343a); border:1px solid var(--border-color,#626269); border-radius:4px; padding:6px 8px; min-height:32px; }
@@ -51,8 +62,27 @@ const css = `
 .moss-status { margin-top:8px; font-size:12px; color:var(--descrip-text,#b9bac1); white-space:pre-line; }
 .moss-status[data-error=true],.moss-restore { color:#ffb4ab; }
 .moss-coordinate-add { margin:10px 0; padding:10px 0; border-bottom:1px solid var(--border-color,#626269); }
-@container (max-width:760px) { .moss-workspace { gap:10px; grid-template-columns:minmax(0,1fr) 230px; } .moss-inspector { padding-left:10px; } .moss-editor button { padding:5px 6px; } }
+@container (max-width:760px) { .moss-editor button { padding:5px 6px; } }
 .moss-editor [hidden] { display:none !important; }
+.moss-agent { border-bottom:1px solid var(--border-color,#626269); margin-bottom:16px; padding-bottom:12px; display:flex; flex-direction:column; gap:8px; }
+.moss-agent details { border:1px solid var(--border-color,#626269); border-radius:4px; padding:8px; }
+.moss-agent details > label { margin-top:8px; }
+.moss-agent summary { cursor:pointer; }
+.moss-editor .moss-agent-toggle { display:flex; align-items:center; justify-content:center; width:32px; height:32px; padding:5px; }
+.moss-agent-toggle[data-busy=true] { border-color:#91c6fa; color:#cbe5ff; }
+.moss-agent-settings { position:relative; z-index:5; }
+.moss-agent-settings > summary { display:flex; align-items:center; justify-content:center; width:32px; height:32px; padding:5px; border:1px solid var(--border-color,#626269); border-radius:4px; background:var(--comfy-input-bg,#34343a); cursor:pointer; list-style:none; }
+.moss-agent-settings > summary::-webkit-details-marker { display:none; }
+.moss-agent-settings > summary:hover,.moss-agent-settings[open] > summary { border-color:#91c6fa; }
+.moss-agent-settings > summary:focus-visible { outline:2px solid #91c6fa; outline-offset:2px; }
+.moss-settings-content { position:absolute; right:0; top:calc(100% + 8px); width:300px; max-width:calc(100cqw - 32px); max-height:340px; overflow:auto; display:flex; flex-direction:column; gap:10px; padding:14px; border-radius:4px; background:var(--comfy-menu-bg,#242428); box-shadow:0 8px 24px rgba(0,0,0,.4); transform-origin:top right; }
+.moss-settings-content select { width:100%; }
+.moss-agent-run { display:inline-flex; gap:8px; align-items:center; justify-content:center; }
+.moss-editor .moss-agent-run[aria-busy=true] { opacity:1; color:#cbe5ff; border-color:#91c6fa; cursor:wait; }
+.moss-agent-spinner { width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:moss-agent-spin .8s linear infinite; flex-shrink:0; }
+@keyframes moss-agent-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .moss-agent-spinner { animation:none; } }
+.moss-editor[data-busy=true] .moss-stage { pointer-events:none; opacity:.75; }
 `;
 
 function element(tag, attrs = {}, text = null) {
@@ -79,7 +109,7 @@ function button(parent, text, callback, attrs = {}) {
   control.addEventListener("click", callback); parent.append(control); return control;
 }
 
-export function createLayoutEditor(raw, onChange) {
+export function createLayoutEditor(raw, onChange, options = {}) {
   let state = emptyState();
   let selected = new Set();
   let primary = null;
@@ -88,6 +118,7 @@ export function createLayoutEditor(raw, onChange) {
   let restoreError = "";
   let notice = "";
   let dims = [1024, 1024];
+  let agentPanel = null;
   const history = new History();
   const root = element("div", { class: "moss-editor" });
   const style = element("style"); style.textContent = css; root.append(style);
@@ -147,19 +178,74 @@ export function createLayoutEditor(raw, onChange) {
   const workspace = element("div", { class: "moss-workspace" });
   const canvasPane = element("section", { class: "moss-canvas-pane", "aria-label": "画布与布局工具" });
   const stageWrap = element("div", { class: "moss-stage-wrap" }); stageWrap.append(svg);
+  const runtimeLog = element("section", { class:"moss-runtime-log", hidden:"", "aria-label":"Agent 运行日志" });
+  runtimeLog.append(element("h3", {}, "Agent 运行过程"));
+  const runtimeText = element("pre", { tabindex:0, "aria-label":"模型思考与工具调用记录" }); runtimeLog.append(runtimeText); stageWrap.append(runtimeLog);
   canvasPane.append(toolbar, stageWrap, canvasNote, arrangeBar);
   const inspector = element("section", { class: "moss-inspector", "aria-label": "布局与元素编辑" });
   const selectionHint = element("p", { class: "moss-selection-hint" }, "选择画布中的框或下方元素，编辑区域描述与坐标。");
   inspector.append(dimensions, dimensionNote, summary.parentElement, addPanel,
     element("div", { class: "moss-section-title" }, "元素列表"), list, selectionHint, properties, footer);
-  workspace.append(canvasPane, inspector); body.append(workspace);
+  const splitter = element("div", { class:"moss-splitter", role:"separator", tabindex:0, "aria-label":"调整右侧编辑栏宽度", "aria-orientation":"vertical", title:"左右拖动调整栏宽；方向键微调" });
+  workspace.append(canvasPane, splitter, inspector); body.append(workspace);
+  let splitDrag = null;
+  function splitBounds() {
+    const available = workspace.clientWidth - 16;
+    return { available, min:Math.min(230, available * .45), max:Math.max(Math.min(230, available * .45), available - 260) };
+  }
+  function layoutSplit(requested = null) {
+    const { available, min, max } = splitBounds(); if (available <= 0) return;
+    const ratio = Number.isFinite(state.ui?.inspector_ratio) ? state.ui.inspector_ratio : .3;
+    const size = Math.max(min, Math.min(max, requested ?? available * ratio));
+    workspace.style.gridTemplateColumns = `minmax(0,1fr) 16px ${size}px`;
+    splitter.setAttribute("aria-valuemin", Math.round(100 * min / available));
+    splitter.setAttribute("aria-valuemax", Math.round(100 * max / available));
+    splitter.setAttribute("aria-valuenow", Math.round(100 * size / available));
+    splitter.setAttribute("aria-valuetext", `右栏宽度 ${Math.round(size)} 像素`);
+    return size;
+  }
+  function resizeSplit(size) {
+    const actual = layoutSplit(size); if (actual === undefined) return;
+    state.ui = { ...state.ui, inspector_ratio:actual / splitBounds().available };
+  }
+  splitter.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || restoreError) return;
+    event.preventDefault(); event.stopPropagation(); splitter.focus();
+    const rect = workspace.getBoundingClientRect();
+    splitDrag = { x:event.clientX, size:inspector.getBoundingClientRect().width * workspace.clientWidth / rect.width,
+      scale:workspace.clientWidth / rect.width, before:state.ui ? JSON.parse(JSON.stringify(state.ui)) : undefined };
+    splitter.dataset.dragging = "true"; splitter.setPointerCapture(event.pointerId);
+  });
+  splitter.addEventListener("pointermove", event => {
+    if (!splitDrag) return;
+    event.preventDefault(); resizeSplit(splitDrag.size + (splitDrag.x - event.clientX) * splitDrag.scale);
+  });
+  function finishSplit(event, cancel = false) {
+    if (!splitDrag) return;
+    if (cancel) { if (splitDrag.before === undefined) delete state.ui; else state.ui = splitDrag.before; layoutSplit(); }
+    splitDrag = null; delete splitter.dataset.dragging; notify();
+    if (splitter.hasPointerCapture(event.pointerId)) splitter.releasePointerCapture(event.pointerId);
+  }
+  splitter.addEventListener("pointerup", event => finishSplit(event));
+  splitter.addEventListener("pointercancel", event => finishSplit(event, true));
+  splitter.addEventListener("lostpointercapture", event => finishSplit(event, true));
+  splitter.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault(); event.stopPropagation();
+    const { min, max } = splitBounds(); const step = event.shiftKey ? 32 : 16;
+    const currentSize = layoutSplit();
+    resizeSplit(event.key === "Home" ? min : event.key === "End" ? max : currentSize + (event.key === "ArrowLeft" ? step : -step));
+    notify();
+  });
 
   function numeric(input) { return input.value.trim() === "" || !Number.isFinite(Number(input.value)) ? null : Number(input.value); }
   function serialize() { return JSON.stringify(state); }
   function notify() { if (!restoreError) onChange(serialize()); }
   function change(update, key = null) {
+    if (agentPanel?.busy() && key !== "task") return;
     const before = serialize(); notice = ""; update();
-    history.push(before, serialize(), key); notify(); render();
+    if (key !== "task") history.push(before, serialize(), key);
+    if (key === "task" || before !== serialize()) notify(); render();
   }
   function addItem(bbox) {
     const item = { id: newId(), label: "object", caption: "", text: "", bbox };
@@ -181,7 +267,7 @@ export function createLayoutEditor(raw, onChange) {
     if (document.activeElement !== control) setValue(control, Number.isFinite(value) ? Number(value.toFixed(3)) : value);
   }
   function travel(redo) {
-    if (gesture) return;
+    if (gesture || agentPanel?.busy()) return;
     const rawState = redo ? history.redo(serialize()) : history.undo(serialize());
     if (rawState === null) return;
     state = readState(rawState); dims = validDimension(state.width) && validDimension(state.height) ? [state.width, state.height] : state.canvas_size ?? dims;
@@ -208,7 +294,7 @@ export function createLayoutEditor(raw, onChange) {
 
   function renderStatus() {
     const errors = errorsFor(state);
-    status.textContent = notice || (errors.length ? errors.slice(0, 4).join("\n") + (errors.length > 4 ? `\n另有 ${errors.length - 4} 项待完善。` : "") : `${state.items.length} 个元素 · ${state.width} × ${state.height} · 可连接 Formatter（MOSS）`);
+    status.textContent = notice || (errors.length ? errors.slice(0, 4).join("\n") + (errors.length > 4 ? `\n另有 ${errors.length - 4} 项待完善。` : "") : `${state.items.length} 个元素 · ${state.width} × ${state.height} · layout_prompr 可连接 Formatter 的 layout 或直接用于 MOSS`);
     status.dataset.error = String(Boolean(notice || errors.length));
   }
   function draw() {
@@ -238,6 +324,7 @@ export function createLayoutEditor(raw, onChange) {
     }
   }
   function render() {
+    layoutSplit();
     setValue(width, state.width); setValue(height, state.height); setValue(summary, state.summary); strict.checked = state.strict_validation;
     selectButton.setAttribute("aria-pressed", String(mode === "select")); drawButton.setAttribute("aria-pressed", String(mode === "draw"));
     undoButton.disabled = !history.undoStack.length; redoButton.disabled = !history.redoStack.length;
@@ -258,7 +345,7 @@ export function createLayoutEditor(raw, onChange) {
       setValue(type, item.label); setValue(caption, item.caption); setValue(text, item.text || ""); text.parentElement.hidden = item.label !== "text";
       coordinateInputs.forEach((control, index) => setCoordinate(control, item.bbox[index])); remove.disabled = false;
     }
-    draw(); renderStatus();
+    draw(); renderStatus(); agentPanel?.refresh();
   }
 
   function point(event) {
@@ -269,7 +356,7 @@ export function createLayoutEditor(raw, onChange) {
     return [Math.max(0, Math.min(dims[0], q.x)), Math.max(0, Math.min(dims[1], q.y))];
   }
   svg.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || restoreError) return;
+    if (event.button !== 0 || restoreError || agentPanel?.busy()) return;
     event.preventDefault(); event.stopPropagation();
     if (!validDimension(state.width) || !validDimension(state.height)) { notice = "请先修正画布宽高。"; renderStatus(); return; }
     const start = point(event); const id = event.target.dataset.id; const handle = event.target.dataset.handle;
@@ -338,15 +425,38 @@ export function createLayoutEditor(raw, onChange) {
       else if (Array.isArray(state.canvas_size) && state.canvas_size.length === 2 && state.canvas_size.every(validDimension)) dims = [...state.canvas_size];
       body.hidden = false; recovery.hidden = true;
       history.undoStack = []; history.redoStack = []; history.lastKey = null; render();
+      agentPanel?.load();
     } catch (error) {
       restoreError = error.message; body.hidden = true; recovery.hidden = false;
       recovery.replaceChildren(element("p", {}, `布局恢复失败：${restoreError} 原始状态仍保留。`));
       button(recovery, "重置为空白布局", () => { load(JSON.stringify(emptyState())); notify(); });
     }
   }
-  const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => draw()); observer?.observe(svg);
+  const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => { layoutSplit(); draw(); }); observer?.observe(svg); observer?.observe(workspace);
   load(raw);
-  return { element: root, load, serialize: () => restoreError ? raw : serialize(), destroy: () => observer?.disconnect() };
+  agentPanel = createAgentPanel({ root, inspector, settingsHost:historyBar, getState: () => state,
+    update: (fn, key) => change(() => fn(state), key), render,
+    fetchApi: options.fetchApi ?? ((path, opts) => api.fetchApi(path, opts)),
+    apply(result, jobId) {
+      const before = serialize();
+      const previous = JSON.parse(before); previous.task = null;
+      state = applyLayoutResult(state, result); state.last_applied_job = jobId;
+      dims = [state.width, state.height]; selected.clear(); primary = null;
+      history.push(JSON.stringify(previous), serialize()); notify(); render();
+    },
+  });
+  historyBar.prepend(historyBar.querySelector(".moss-agent-toggle"), historyBar.querySelector(".moss-agent-settings"));
+  if (!restoreError) agentPanel.load();
+  return { element: root, load, serialize: () => restoreError ? raw : serialize(),
+    acceptCompilation(result) {
+      if (restoreError || agentPanel.busy()) return;
+      const candidate = applyLayoutResult(state, result);
+      if (contentKey(candidate) !== contentKey(state)) return;
+      if (JSON.stringify(state.output) !== JSON.stringify(candidate.output)) {
+        state.output = candidate.output; notify(); render();
+      }
+    },
+    destroy: () => { observer?.disconnect(); agentPanel.destroy(); } };
 }
 
 function attach(node) {
@@ -374,16 +484,29 @@ function attach(node) {
   const originalConfigure = node.onConfigure;
   node.onConfigure = function (...args) {
     const result = originalConfigure?.apply(this, args);
+    // The graph migration already merges the legacy layout/prompt connections.
+    this.outputs = this.outputs?.slice(0, 3) ?? [];
+    for (const [index, [name, type]] of [["layout_prompr", "STRING"], ["width", "INT"], ["height", "INT"]].entries()) {
+      if (this.outputs[index]) Object.assign(this.outputs[index], { name, localized_name:name, type });
+      else this.addOutput?.(name, type);
+    }
     this.size = [Math.max(this.size[0], 720), Math.max(this.size[1], 480)];
     editor.load(stateWidget.value);
     return result;
   };
   const originalRemoved = node.onRemoved;
   node.onRemoved = function (...args) { editor.destroy(); return originalRemoved?.apply(this, args); };
+  const originalExecuted = node.onExecuted;
+  node.onExecuted = function (message, ...args) {
+    const result = originalExecuted?.call(this, message, ...args);
+    if (message?.moss_layout_result?.[0]) editor.acceptCompilation(message.moss_layout_result[0]);
+    return result;
+  };
 }
 
 app.registerExtension({
   name: "NewBie.MossLayoutEditor",
+  beforeConfigureGraph: migrateLayoutGraph,
   nodeCreated: attach,
   loadedGraphNode(node) { attach(node); node._mossEditor?.load(node.widgets.find(widget => widget.name === "layout_state").value); },
 });

@@ -1,6 +1,7 @@
 """Low-effort pipeline and Low incremental revision flow."""
 
 import json
+from prompt_agent.execution_context import check_interrupted
 
 from prompt_agent.output_contract import output_instruction
 from prompt_agent.moss_layout import layout_search_text
@@ -75,6 +76,9 @@ def batch_search_tags(agent, dimensions):
     all_tag_names = []
     tag_cn_map: dict[str, str] = {}
     for dim in dimensions:
+        check_interrupted(agent)
+        if getattr(agent, "_standalone", False):
+            agent._trace("tool", status="running", title="search_tags", summary="搜索标签中")
         _log(f"  > 搜索：{dim}", _C.GREEN)
         result_str = execute_search_tags(
             query=dim, search_mode="full_scene", show_nsfw=True,
@@ -142,6 +146,7 @@ def explore_related_tags(agent, all_tag_names, user_text):
                     continue
                 args["limit"] = min(int(args.get("limit", 30)), 50)
                 agent._log_tool_call(name, args)
+                check_interrupted(agent)
                 result = execute_get_related_tags(
                     tags=args.get("tags", []),
                     limit=int(args.get("limit", 30)),
@@ -158,6 +163,7 @@ def explore_related_tags(agent, all_tag_names, user_text):
                 except Exception:
                     pass
     except Exception as e:
+        agent._raise_if_interrupted(e)
         _log_warn(
             f"Step 3 LLM 调用失败（已跳过关联探索）: "
             f"{format_agent_error_summary(e)}"
@@ -227,11 +233,12 @@ def run_low_effort(agent, user_text, image=None):
     _log_banner("Low effort 流水线模式已启用")
     _log(f"模式: {agent.mode} | Effort: Low | MCP: HF (主) / MS (备)")
 
-    pbar = comfy.utils.ProgressBar(4, node_id=agent.unique_id) if _COMFY_AVAILABLE else None
+    pbar = comfy.utils.ProgressBar(4, node_id=agent.unique_id) if _COMFY_AVAILABLE and not getattr(agent, "_standalone", False) else None
 
     def _tick(step):
-        if _COMFY_AVAILABLE:
-            comfy.model_management.throw_exception_if_processing_interrupted()
+        check_interrupted(agent)
+        if getattr(agent, "_standalone", False):
+            agent._trace("progress", status="running", title="Low 流水线", summary=f"{step}/4")
         if pbar:
             pbar.update_absolute(step)
 

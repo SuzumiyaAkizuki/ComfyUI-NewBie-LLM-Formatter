@@ -141,14 +141,22 @@ class LLM_Prompt_Formatter:
                 "force_full_agent_run": ("BOOLEAN", {"default": False}),
             },
             "optional": {
-                "layout": ("MOSS_LAYOUT",),
+                "layout": ("STRING", {"forceInput": True, "multiline": True}),
                 "image": ("IMAGE",),
                 "enable_web_search": ("BOOLEAN", {"default": False, "tooltip": "启用 Tavily 联网搜索，仅 Medium/High 生效；请先在 LPF_config.json 填写 tavily_api_key。"}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
+                "prompt": "PROMPT",
             }
         }
+
+    @classmethod
+    def IS_CHANGED(cls, prompt=None, unique_id=None, **kwargs):
+        # Compiled strings omit dimensions; include the direct editor's source
+        # context so equal compiled text cannot hide a canvas/policy change.
+        from prompt_agent.moss_layout import editor_layout_context, layout_fingerprint
+        return layout_fingerprint(editor_layout_context(prompt, unique_id))
 
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("xml_out", "text_out")
@@ -298,10 +306,11 @@ class LLM_Prompt_Formatter:
 
     # ── 主方法 ─────────────────────────────────────────────────────────
 
-    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, force_full_agent_run=False, image=None, unique_id=None, enable_web_search=False, layout=None):
+    def process_text(self, api_key, api_url, model_name, mode, user_text, thinking, agent_effort, force_full_agent_run=False, image=None, unique_id=None, enable_web_search=False, layout=None, prompt=None):
         if layout is not None:
-            from prompt_agent.moss_layout import prepare_layout, append_layout_input
-            layout = prepare_layout(layout, mode)
+            from prompt_agent.moss_layout import prepare_layout, append_layout_input, editor_layout_context
+            context = editor_layout_context(prompt, unique_id) if isinstance(layout, str) else None
+            layout = prepare_layout(layout, mode, context)
             user_text = append_layout_input(user_text, layout)
         config = load_api_config()
         final_key, final_url = self._resolve_credentials(config, api_key, api_url)

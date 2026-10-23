@@ -13,6 +13,9 @@ from .MOSS_Layout_Node import MOSS_Layout_Editor
 
 WEB_DIRECTORY = "./js"
 
+from .prompt_agent.layout_routes import register_layout_routes
+register_layout_routes()
+
 NODE_CLASS_MAPPINGS = {
     "LLM_Prompt_Formatter": LLM_Prompt_Formatter,
     "LLM_Xml_Style_Injector": LLM_Xml_Style_Injector,

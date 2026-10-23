@@ -5,6 +5,33 @@ export const validDimension = (n) => Number.isSafeInteger(n) && n > 0 && n % 16 
 export const newId = () => globalThis.crypto?.randomUUID?.() ?? `box-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export const emptyState = () => ({ version: 1, width: 1024, height: 1024, summary: "", items: [], strict_validation: true });
 
+export function stateToDraft(state) {
+  return { width: state.width, height: state.height, bbox_coord_space: "abs", bbox_format: "xyxy",
+    summary: { ...(state.summary_extra ?? {}), caption: state.summary },
+    items: state.items.map(({ id, text, ...item }) => item.label === "text" ? { ...item, text } : item) };
+}
+const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ?
+  Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+export const contentKey = (state) => JSON.stringify(canonical(stateToDraft(state)));
+export const requestKey = (state) => JSON.stringify([contentKey(state), state.strict_validation, state.agent]);
+
+export function applyLayoutResult(state, result) {
+  const { draft, output } = result;
+  if (!output || typeof output.prompt !== "string" || !output.prompt.trim() || typeof output.text_out !== "string") {
+    throw new Error("Agent 编译结果为空或格式无法读取");
+  }
+  if (!draft || draft.bbox_coord_space !== "abs" || draft.bbox_format !== "xyxy" ||
+      !validDimension(draft.width) || !validDimension(draft.height) || !draft.summary ||
+      typeof draft.summary.caption !== "string" || !Array.isArray(draft.items)) throw new Error("Agent 布局格式无法读取");
+  const { caption, ...extra } = draft.summary;
+  const next = readState(JSON.stringify({ ...state, width: draft.width, height: draft.height,
+    canvas_size: [draft.width, draft.height], summary: caption, summary_extra: extra,
+    items: draft.items.map(item => ({ ...item, id: newId() })), task: null }));
+  if (errorsFor(next).length) throw new Error("Agent 布局存在无效元素");
+  next.output = { ...output, source_key: contentKey(next) };
+  return next;
+}
+
 export function readState(raw) {
   const state = JSON.parse(raw);
   if (!state || state.version !== 1 || !Array.isArray(state.items) || typeof state.summary !== "string" ||

@@ -1,6 +1,7 @@
 """Medium/High Agent tool loop and convergence guards."""
 
 import json
+from prompt_agent.execution_context import check_interrupted
 from concurrent.futures import ThreadPoolExecutor
 
 from prompt_agent import utils
@@ -58,8 +59,7 @@ def complete_moss_output(agent, messages, content=None):
         messages.append({"role": "assistant", "content": content})
     available = []
     for _ in range(6):
-        if _COMFY_AVAILABLE:
-            comfy.model_management.throw_exception_if_processing_interrupted()
+        check_interrupted(agent)
         compiled = getattr(agent, "_moss_compiled_prompt", None)
         if compiled:
             instruction = (
@@ -133,8 +133,7 @@ def force_final_output(agent, messages):
         before = getattr(agent, "_moss_final_tokens", 0)
         content = complete_moss_output(agent, messages)
         return content, getattr(agent, "_moss_final_tokens", 0) - before
-    if _COMFY_AVAILABLE:
-        comfy.model_management.throw_exception_if_processing_interrupted()
+    check_interrupted(agent)
     messages.append({
         "role": "user",
         "content": "请根据已收集到的标签信息直接输出最终 prompt，禁止再调用任何工具。",
@@ -162,7 +161,7 @@ def run_agent_loop(agent, messages, max_rounds, provided_norm,
                    error_writer=_default_error_writer, tools_provider=get_tools):
     """执行 Agent 工具循环。Returns (content, rounds, total_tokens, format)。"""
     self = agent
-    pbar = comfy.utils.ProgressBar(max_rounds, node_id=self.unique_id) if _COMFY_AVAILABLE else None
+    pbar = comfy.utils.ProgressBar(max_rounds, node_id=self.unique_id) if _COMFY_AVAILABLE and not getattr(agent, "_standalone", False) else None
 
     rounds = 0
     total_tokens = 0
@@ -175,8 +174,7 @@ def run_agent_loop(agent, messages, max_rounds, provided_norm,
     captured_format = None
 
     while rounds < max_rounds:
-        if _COMFY_AVAILABLE:
-            comfy.model_management.throw_exception_if_processing_interrupted()
+        check_interrupted(agent)
         _log_round_header(rounds + 1)
         self._trace(
             "round",
@@ -327,6 +325,7 @@ def run_agent_loop(agent, messages, max_rounds, provided_norm,
                         try:
                             results.append(future.result(timeout=60))
                         except Exception as e:
+                            self._raise_if_interrupted(e)
                             _log_error(
                                 f"工具调用超时或异常: {format_agent_error_summary(e)}"
                             )
@@ -335,6 +334,7 @@ def run_agent_loop(agent, messages, max_rounds, provided_norm,
                                 ensure_ascii=False,
                             ))
             except Exception as e:
+                self._raise_if_interrupted(e)
                 _log_error(f"并行工具调用失败: {format_agent_error_summary(e)}")
                 for tool_call, _, _ in parsed:
                     messages.append({
