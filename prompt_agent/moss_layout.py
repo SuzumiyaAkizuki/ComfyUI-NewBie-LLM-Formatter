@@ -186,6 +186,12 @@ def append_layout_input(user_text, layout):
 
 def layout_search_text(user_text, layout):
     """Search visual descriptions, not JSON field names or numeric coordinates."""
+    if "\n[CURRENT_CANVAS_DATA]\n" in user_text:
+        original, raw = user_text.split("\n[CURRENT_CANVAS_DATA]\n", 1)
+        original = original.split("\n[CANVAS_CONVERSATION_RULES]", 1)[0]
+        current = json.loads(raw)
+        return "\n".join([original, current["summary"]["caption"],
+                          *(item["caption"] for item in current["items"])])
     marker = "\n\n[MOSS_LAYOUT_INPUT]\n"
     if layout is None or marker not in user_text:
         return user_text

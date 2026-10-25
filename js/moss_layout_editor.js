@@ -14,7 +14,10 @@ const css = `
 .moss-canvas-pane { display:flex; flex-direction:column; min-height:0; min-width:0; }
 .moss-stage-wrap { display:flex; flex:1; min-height:0; min-width:0; overflow:hidden; position:relative; }
 .moss-runtime-log { position:absolute; inset:0; z-index:1; padding:16px; display:flex; flex-direction:column; background:var(--comfy-menu-bg,#242428); border:1px solid var(--border-color,#626269); }
-.moss-runtime-log h3 { margin:0 0 12px; font:600 14px/1.5 system-ui,sans-serif; }
+.moss-runtime-log h3 { margin:0 0 12px; font:600 14px/1.5 system-ui,sans-serif; display:flex; align-items:center; gap:9px; }
+.moss-runtime-log h3::before { content:""; width:11px; height:11px; border:1.5px solid currentColor; border-right-color:transparent; border-radius:50%; animation:moss-agent-spin 1s linear infinite; flex-shrink:0; }
+.moss-log-entry { display:block; animation:moss-log-enter 180ms cubic-bezier(.16,1,.3,1); }
+@keyframes moss-log-enter { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
 .moss-runtime-log pre { margin:0; flex:1; min-height:0; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.65 system-ui,sans-serif; color:var(--fg-color,#e4e4e7); user-select:text; scrollbar-width:thin; }
 .moss-inspector { min-height:0; min-width:0; overflow:auto; overscroll-behavior:contain; padding-left:8px; padding-right:4px; scrollbar-width:thin; scrollbar-color:var(--border-color,#626269) transparent; }
 .moss-splitter { cursor:col-resize; position:relative; touch-action:none; user-select:none; border-radius:3px; }
@@ -81,7 +84,7 @@ const css = `
 .moss-editor .moss-agent-run[aria-busy=true] { opacity:1; color:#cbe5ff; border-color:#91c6fa; cursor:wait; }
 .moss-agent-spinner { width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:moss-agent-spin .8s linear infinite; flex-shrink:0; }
 @keyframes moss-agent-spin { to { transform:rotate(360deg); } }
-@media (prefers-reduced-motion:reduce) { .moss-agent-spinner { animation:none; } }
+@media (prefers-reduced-motion:reduce) { .moss-agent-spinner, .moss-runtime-log h3::before, .moss-log-entry { animation:none; } }
 .moss-editor[data-busy=true] .moss-stage { pointer-events:none; opacity:.75; }
 `;
 
@@ -437,6 +440,15 @@ export function createLayoutEditor(raw, onChange, options = {}) {
   agentPanel = createAgentPanel({ root, inspector, settingsHost:historyBar, getState: () => state,
     update: (fn, key) => change(() => fn(state), key), render,
     fetchApi: options.fetchApi ?? ((path, opts) => api.fetchApi(path, opts)),
+    clear() {
+      state = { ...emptyState(), width:state.width, height:state.height,
+        strict_validation:state.strict_validation,
+        canvas_size:[state.width, state.height], editor_id:state.editor_id, client_id:state.client_id,
+        agent:{ ...state.agent, request:"", lock_layout:false }, ui:state.ui };
+      gesture = null; selected.clear(); primary = null; notice = "";
+      history.undoStack = []; history.redoStack = []; history.lastKey = null;
+      notify(); render();
+    },
     apply(result, jobId) {
       const before = serialize();
       const previous = JSON.parse(before); previous.task = null;

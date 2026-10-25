@@ -38,11 +38,32 @@ async def latest(request):
         raise web.HTTPNotFound(text="任务不存在或服务已重启")
 
 
+async def accept(request):
+    try:
+        return web.json_response(jobs.accept(owner(request), request.match_info["job_id"]))
+    except KeyError:
+        raise web.HTTPNotFound(text="任务不存在或会话已清空")
+
+
+async def reset(request):
+    try:
+        return web.json_response(jobs.reset(owner(request), (await request.json()).get("editor_id")))
+    except (ValueError, TypeError, AttributeError) as error:
+        raise web.HTTPBadRequest(text=str(error))
+
+
+async def session(request):
+    return web.json_response(jobs.history(owner(request), request.query.get("editor_id", "")))
+
+
 def register_layout_routes():
     from server import PromptServer
     routes = PromptServer.instance.routes
     routes.get(PREFIX + "/config")(config)
     routes.post(PREFIX + "/jobs")(start)
+    routes.post(PREFIX + "/jobs/{job_id}/accept")(accept)
+    routes.post(PREFIX + "/reset")(reset)
+    routes.get(PREFIX + "/session")(session)
     routes.get(PREFIX + "/latest")(latest)
     routes.get(PREFIX + "/jobs/{job_id}")(job)
     routes.delete(PREFIX + "/jobs/{job_id}")(job)

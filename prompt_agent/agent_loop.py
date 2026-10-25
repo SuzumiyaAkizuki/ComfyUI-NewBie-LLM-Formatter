@@ -351,7 +351,8 @@ def run_agent_loop(agent, messages, max_rounds, provided_norm,
             round_returned: set[str] = set()
             for (tool_call, name, args), result in zip(parsed, results):
                 self._log_tool_call(name, args)
-                self._log_tool_result(name, result)
+                # The structured result event below is the single trace entry.
+                self._log_tool_result(name, result, emit_trace=False)
                 result_details = {
                     "round": rounds + 1,
                     "tool_call_id": tool_call["id"],

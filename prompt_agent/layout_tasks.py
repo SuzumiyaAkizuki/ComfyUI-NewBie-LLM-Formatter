@@ -14,7 +14,7 @@ import time
 import uuid
 
 from prompt_agent.execution_context import AgentCancelled, check_interrupted
-from prompt_agent.moss_layout import validate_draft, layout_fingerprint, append_layout_input
+from prompt_agent.moss_layout import validate_draft, layout_fingerprint
 
 
 def state_draft(state):
@@ -97,9 +97,9 @@ def validate_request(payload):
             raise ValueError("画布宽高必须为 16 的正整数倍")
     if type(state.get("strict_validation", True)) is not bool:
         raise ValueError("严格校验开关必须为布尔值")
-    if payload.get("mode") not in ("generate", "polish"):
+    if payload.get("mode", "conversation") not in ("generate", "polish", "conversation"):
         raise ValueError("不支持的生成模式")
-    if payload["mode"] == "polish":
+    if payload.get("mode") == "polish":
         state_draft(state)
     settings = payload.get("settings", {})
     if not isinstance(settings, dict) or settings.get("effort") not in ("Close", "Low", "Medium", "High"):
@@ -108,47 +108,47 @@ def validate_request(payload):
         raise ValueError("请选择模型")
     if any(type(settings.get(k, False)) is not bool for k in ("thinking", "web_search", "force_full_run")):
         raise ValueError("思考与网页搜索开关必须为布尔值")
+    if type(payload.get("lock_layout", False)) is not bool:
+        raise ValueError("锁定布局必须为布尔值")
+    from prompt_agent.layout_conversation import canvas_input, polish_only
+    if not state.get("items") and polish_only(payload["request"], payload.get("lock_layout", False)):
+        raise ValueError("空画板无法仅润色，请先创建布局")
+    canvas_input(state, payload["request"], polish_only(payload["request"],
+        payload.get("lock_layout", False) or payload.get("mode") == "polish"))
     return deepcopy(payload)
 
 
 def run_layout_agent(payload, cancel, trace, owner):
     from LLM_Node import load_api_config, LLM_Prompt_Formatter
-    from prompt_agent.agent_core import PromptAgent
+    from prompt_agent.layout_conversation import LayoutConversationAgent, canvas_input, polish_only
     from prompt_agent.agent_loop import complete_moss_output
     config = load_api_config() or {}
     key, url = LLM_Prompt_Formatter._resolve_credentials(config, None, None)
     settings, state = payload["settings"], payload["state"]
-    agent = PromptAgent(key, url, settings["model"], "MOSS", settings.get("thinking", False),
+    agent = LayoutConversationAgent(key, url, settings["model"], "MOSS", settings.get("thinking", False),
         config, effort=settings["effort"], unique_id=f"layout:{owner}:{payload['editor_id']}",
         enable_web_search=settings.get("web_search", False))
     agent._standalone = True
     agent._cancel_event = cancel
     agent._trace_sink = trace
-    agent._layout_run_context = {**{k: v for k, v in settings.items() if k != "force_full_run"}, "mode": payload["mode"]}
-    text = ("必须使用Layout模式，禁止使用caption模式。\n"
-            f"当前画布宽度：{state['width']} px；高度：{state['height']} px。\n\n"
-            + payload["request"])
-    if payload["mode"] == "polish":
-        agent._moss_layout = {"draft": state_draft(state), "strict_validation": state.get("strict_validation", True)}
-        text = append_layout_input(text, agent._moss_layout)
-    else:
-        agent._moss_canvas = (state["width"], state["height"])
-        text += (f"\n\n必须生成完整 MOSS Layout，画布固定为 {state['width']} × {state['height']}。"
-                 "自由规划元素和位置，草稿使用 abs/xyxy 像素坐标；必须调用 compile_moss_prompt，禁止输出 caption。")
+    agent._layout_history = deepcopy(payload.get("_history", []))
+    locked = polish_only(payload["request"], payload.get("lock_layout", False) or payload.get("mode") == "polish")
+    text, current = canvas_input(state, payload["request"], locked)
+    agent._moss_canvas = (state["width"], state["height"])
+    if locked:
+        agent._moss_layout = {"draft": current, "strict_validation": True}
     try:
         check_interrupted(agent)
         if settings["effort"] == "Close":
             system, fu, fa, _, _ = LLM_Prompt_Formatter._build_normal_config("MOSS", config, url, settings["model"])
             messages = LLM_Prompt_Formatter._build_normal_messages(system, fu, fa, text, None)
+            messages[-1:-1] = deepcopy(agent._layout_history)
             _, explanation = agent._parse_output(complete_moss_output(agent, messages))
         else:
-            _, explanation = agent.run(text, force_full_run=settings.get("force_full_run", False))
+            _, explanation = agent.run(text, force_full_run=True)
         check_interrupted(agent)
         draft = validate_draft(getattr(agent, "_moss_compiled_draft", None))
-        if payload["mode"] == "generate":
-            explanation += f"\n\n画布尺寸：{draft['width']} × {draft['height']}；生成工作流请使用相同尺寸。"
-        if payload["mode"] == "generate":
-            explanation += f"\n\n画布尺寸：{draft['width']} × {draft['height']}；生成工作流请使用相同尺寸。"
+        explanation += f"\n\n画布尺寸：{draft['width']} × {draft['height']}；生成工作流请使用相同尺寸。"
         result = compilations.remember(draft, agent._moss_compiled_prompt, explanation)
         return {"draft": draft, "output": result, "input_version": payload["input_version"]}
     finally:
@@ -161,6 +161,7 @@ class LayoutJobs:
     def __init__(self, runner=run_layout_agent):
         self.runner = runner
         self.jobs = OrderedDict()
+        self.sessions = {}  # No disk persistence or TTL: explicit reset or process exit.
         self.lock = threading.RLock()
         self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="moss-layout")
 
@@ -187,9 +188,18 @@ class LayoutJobs:
             self._prune()
             if self.active(owner, payload["editor_id"]):
                 raise ValueError("此编辑器已有任务在运行")
+            previous = payload.get("state", {}).get("last_applied_job")
+            if previous:
+                try:
+                    self.accept(owner, previous)
+                except KeyError:
+                    pass
+            session = self.sessions.setdefault((owner, payload["editor_id"]), [])
+            payload["_history"] = deepcopy(session)
             job = {"job_id": str(uuid.uuid4()), "owner": owner, "editor_id": payload["editor_id"],
                 "input_version": payload["input_version"], "status": "queued", "events": [],
-                "updated": time.time(), "cancel": threading.Event()}
+                "updated": time.time(), "cancel": threading.Event(), "_session": session,
+                "_request": payload["request"], "_accepted": False}
             self.jobs[job["job_id"]] = job
             self.executor.submit(self._work, job, payload)
             return self._public(job)
@@ -234,12 +244,45 @@ class LayoutJobs:
 
     @staticmethod
     def _public(job):
-        return deepcopy({k: v for k, v in job.items() if k not in ("owner", "cancel", "updated")})
+        return deepcopy({k: v for k, v in job.items() if k not in ("owner", "cancel", "updated") and not k.startswith("_")})
+
+    def accept(self, owner, job_id):
+        """Only results actually applied by the editor become creative history."""
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if (not job or job["owner"] != owner or job["status"] != "succeeded"
+                    or self.sessions.get((owner, job["editor_id"])) is not job["_session"]):
+                raise KeyError(job_id)
+            if not job["_accepted"]:
+                job["_session"].extend([
+                    {"role": "user", "content": job["_request"]},
+                    {"role": "assistant", "content": job["result"]["output"]["text_out"]},
+                ])
+                job["_accepted"] = True
+            return {"turns": len(job["_session"]) // 2}
+
+    def reset(self, owner, editor):
+        if not isinstance(editor, str) or not editor.strip():
+            raise ValueError("缺少 editor_id")
+        with self.lock:
+            if self.active(owner, editor):
+                raise ValueError("请先取消任务并等待结束，再清空画板和上下文")
+            previous = self.sessions.get((owner, editor))
+            if previous is not None:
+                previous.clear()
+            self.sessions[(owner, editor)] = []
+            return {"turns": 0}
+
+    def history(self, owner, editor):
+        with self.lock:
+            return {"messages": deepcopy(self.sessions.get((owner, editor), []))}
 
     def get(self, owner, job_id, cancel=False):
         with self.lock:
             job = self.jobs.get(job_id)
-            if not job or job["owner"] != owner or (job["status"] not in self.ACTIVE and time.time() - job["updated"] > 1800):
+            if (not job or job["owner"] != owner
+                    or self.sessions.get((owner, job["editor_id"])) is not job["_session"]
+                    or (job["status"] not in self.ACTIVE and time.time() - job["updated"] > 1800)):
                 raise KeyError(job_id)
             if cancel and job["status"] in self.ACTIVE:
                 job["cancel"].set()
@@ -249,7 +292,9 @@ class LayoutJobs:
     def latest(self, owner, editor):
         with self.lock:
             for job in reversed(list(self.jobs.values())):
-                if job["owner"] == owner and job["editor_id"] == editor and (job["status"] in self.ACTIVE or time.time() - job["updated"] <= 1800):
+                if (job["owner"] == owner and job["editor_id"] == editor
+                        and self.sessions.get((owner, editor)) is job["_session"]
+                        and (job["status"] in self.ACTIVE or time.time() - job["updated"] <= 1800)):
                     return self._public(job)
         raise KeyError(editor)
 

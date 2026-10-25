@@ -43,7 +43,8 @@ def execute_web_search(api_key, query, max_results=5):
                     "query": query.strip(), "max_results": max_results,
                     "topic": "general", "search_depth": "basic",
                     "include_answer": False, "include_raw_content": False,
-                    "include_images": False, "auto_parameters": False,
+                    "include_images": True, "include_image_descriptions": True,
+                    "auto_parameters": False,
                 },
             )
             response.raise_for_status()
@@ -54,10 +55,14 @@ def execute_web_search(api_key, query, max_results=5):
         sources = [
             {"title": str(item.get("title") or "")[:300],
              "url": str(item.get("url") or "")[:2000],
-             "content": str(item.get("content") or "")[:4000]}
+             "content": str(item.get("content") or "")[:4000],
+             "score": item.get("score"),
+             "images": item.get("images") if isinstance(item.get("images"), list) else []}
             for item in results[:max_results] if isinstance(item, dict)
         ]
-        return json.dumps({"query": query.strip(), "results": sources}, ensure_ascii=False)
+        return json.dumps({"query": query.strip(), "results": sources,
+                           "images": data.get("images") if isinstance(data.get("images"), list) else []},
+                          ensure_ascii=False)
     except httpx.HTTPStatusError as exc:
         return error(f"Tavily request failed (HTTP {exc.response.status_code}).")
     except httpx.TimeoutException:

@@ -1,4 +1,5 @@
-import { contentKey, requestKey, newId, validDimension, errorsFor } from "./moss_layout_model.js";
+import { contentKey, requestKey, newId, validDimension, validBox, errorsFor } from "./moss_layout_model.js";
+import { traceRows } from "./moss_layout_trace.js";
 
 const editors = new Map();
 function clientId() {
@@ -11,7 +12,7 @@ function clientId() {
 const fallbackClient = newId();
 
 // The panel has no API-key input. Config is resolved exclusively by the server.
-export function createAgentPanel({ root, inspector, settingsHost, getState, update, apply, render, fetchApi = fetch }) {
+export function createAgentPanel({ root, inspector, settingsHost, getState, update, apply, clear, render, fetchApi = fetch }) {
   const token = {};
   const motions = new Map();
   function reveal(el, open, kind, complete = () => {}) {
@@ -32,8 +33,9 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
       from = snapshot ? Object.fromEntries(Object.keys(full).map(k => [k, snapshot[k]])) : zero;
       to = open ? full : zero; el.style.overflow = "hidden";
     } else {
-      from = snapshot ? { opacity:snapshot.opacity, transform:snapshot.transform } : { opacity:0, transform:"translateY(-6px) scale(.98)" };
-      to = open ? { opacity:1, transform:"translateY(0) scale(1)" } : { opacity:0, transform:"translateY(-4px) scale(.98)" };
+      const offset = kind === "log" ? "translateY(4px)" : "translateY(-6px) scale(.98)";
+      from = snapshot ? { opacity:snapshot.opacity, transform:snapshot.transform } : { opacity:0, transform:offset };
+      to = open ? { opacity:1, transform:"translateY(0) scale(1)" } : { opacity:0, transform:offset };
     }
     const animation = el.animate([from, to], { duration:open ? 180 : 130, easing:"cubic-bezier(.16,1,.3,1)" });
     motions.set(el, animation);
@@ -42,7 +44,7 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
       motions.delete(el); el.hidden = !open; el.style.overflow = ""; complete();
     }).catch(() => {});
   }
-  let disposed = false, timer = null, polling = false, config = null, message = "", modelError = "";
+  let disposed = false, timer = null, polling = false, resetting = false, config = null, message = "", modelError = "";
   function el(tag, text, parent = panel) { const n = document.createElement(tag); if (text) n.textContent = text; parent.append(n); return n; }
   function field(label, tag, parent = panel) {
     const wrap = el("label", label, parent); const n = el(tag, "", wrap); n.setAttribute("aria-label", label); return n;
@@ -64,9 +66,9 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
     reveal(panel, agentOpen, "panel");
   };
   const heading = el("div", "Agent 布局助手"); heading.className = "moss-section-title";
-  const request = field("创作 / 修订要求", "textarea"); request.rows = 3; request.placeholder = "描述你希望生成或修订的画面…";
-  const mode = field("Agent 模式", "select");
-  for (const [value, text] of [["generate", "生成新布局"], ["polish", "保留布局润色"]]) { const o = el("option", text, mode); o.value = value; }
+  const request = field("本轮创作 / 修改要求", "textarea"); request.rows = 3; request.placeholder = "例如：把标题放大；仅润色描述，不调整画框…";
+  const lockLayout = field("锁定布局，仅润色描述", "input"); lockLayout.type = "checkbox"; lockLayout.parentElement.className = "moss-check";
+  el("p", "每轮参考最新画板和此前要求；关闭 ComfyUI 后清空上下文。手工修改后可直接开启工作流。日常修改无需重新生成。", panel).className = "moss-note";
   const settings = el("details", "", settingsHost); settings.className = "moss-agent-settings";
   const settingsToggle = el("summary", "", settings); settingsToggle.setAttribute("aria-label", "Agent 设置"); settingsToggle.setAttribute("role", "button"); settingsToggle.title = "Agent 设置";
   const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -93,15 +95,18 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
   for (const value of ["Close", "Low", "Medium", "High"]) { const o = el("option", value, effort); o.value = value; }
   const thinking = field("启用思考", "input", settingsContent); thinking.type = "checkbox"; thinking.parentElement.className = "moss-check";
   const web = field("网页搜索（Medium / High）", "input", settingsContent); web.type = "checkbox"; web.parentElement.className = "moss-check";
-  const forceFull = field("强制冷启动", "input", settingsContent); forceFull.type = "checkbox"; forceFull.parentElement.className = "moss-check";
-  el("p", "忽略 Agent 增量基线，重新完整生成；Close 本身即为普通生成。", settingsContent).className = "moss-note";
   const actions = el("div"); actions.className = "moss-row";
   const run = el("button", "", actions); run.type = "button";
   run.className = "moss-agent-run";
   const spinner = el("span", "", run); spinner.className = "moss-agent-spinner"; spinner.setAttribute("aria-hidden", "true"); spinner.hidden = true;
   const runLabel = el("span", "运行 Agent", run);
   const cancel = el("button", "取消任务", actions); cancel.type = "button";
+  const reset = el("button", "清空画板和上下文"); reset.type = "button";
+  reset.title = "清空当前作品和 Agent 会话，保留画布尺寸与模型设置；运行中请先取消任务";
   const progress = el("p"); progress.className = "moss-note"; progress.setAttribute("role", "status"); progress.setAttribute("aria-live", "polite");
+  const conversation = el("details"); el("summary", "本次会话", conversation);
+  const conversationText = el("pre", "尚无已完成的对话。", conversation);
+  conversationText.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;font:inherit;user-select:text";
   const outputDetails = el("details"); el("summary", "当前提示词", outputDetails);
   const preview = field("提示词预览", "textarea", outputDetails); preview.readOnly = true; preview.rows = 5;
   const explanation = el("p", "", outputDetails); explanation.className = "moss-note";
@@ -116,16 +121,18 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
     editors.set(state.editor_id, token);
     if (state.client_id && state.client_id !== clientId()) state.task = null;
     state.client_id = clientId();
-    state.agent = { request: "", mode: "generate", model: "", effort: "Medium", thinking: false, web_search: false, force_full_run:false, ...state.agent };
+    state.agent = { request: "", model: "", effort: "Medium", thinking: false, web_search: false, ...state.agent };
+    if (state.agent.lock_layout === undefined) state.agent.lock_layout = state.agent.mode === "polish";
+    delete state.agent.mode; delete state.agent.force_full_run;
   }
-  function busy() { return Boolean(getState().task); }
+  function busy() { return resetting || Boolean(getState().task); }
   function changed() {
     if (busy()) return;
-    update(state => { state.agent = { request: request.value, mode: mode.value, model: model.value,
-      effort: effort.value, thinking: thinking.checked, web_search: web.checked, force_full_run:forceFull.checked }; }, "agent-settings");
+    update(state => { state.agent = { request: request.value, lock_layout: lockLayout.checked, model: model.value,
+      effort: effort.value, thinking: thinking.checked, web_search: web.checked }; }, "agent-settings");
   }
   request.addEventListener("input", changed);
-  for (const n of [mode, model, effort, thinking, web, forceFull]) n.addEventListener("change", changed);
+  for (const n of [lockLayout, model, effort, thinking, web]) n.addEventListener("change", changed);
   async function api(path, options = {}) {
     const response = await fetchApi(`/newbie/moss-layout${path}`, { ...options,
       headers: { "Content-Type": "application/json", "X-Moss-Client-Id": clientId() } });
@@ -138,19 +145,21 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
     agentToggle.title = running ? "Agent 布局助手（运行中）" : agentOpen ? "收起 Agent 布局助手" : "展开 Agent 布局助手";
     agentToggle.dataset.busy = String(running);
     root.dataset.busy = String(running);
-    request.value = a.request; mode.value = a.mode; effort.value = a.effort; thinking.checked = a.thinking; web.checked = a.web_search;
-    forceFull.checked = a.force_full_run;
+    request.value = a.request; lockLayout.checked = a.lock_layout; effort.value = a.effort; thinking.checked = a.thinking; web.checked = a.web_search;
     const models = [...new Set([...(config?.models ?? []), ...(a.model ? [a.model] : [])])];
     if (JSON.stringify([...model.options].map(o => o.value)) !== JSON.stringify(models)) {
       model.replaceChildren(); for (const value of models) { const o = el("option", value, model); o.value = value; }
     }
     model.value = a.model;
-    for (const n of [request, mode, model, effort, thinking, forceFull]) n.disabled = running;
+    for (const n of [request, lockLayout, model, effort, thinking]) n.disabled = running;
+    reset.disabled = running;
     web.disabled = running || !["Medium", "High"].includes(a.effort) || !config?.web_search_configured;
     run.disabled = running || !config?.api_configured || !a.model || !a.request.trim() ||
-      !validDimension(state.width) || !validDimension(state.height) || (a.mode === "polish" && errorsFor(state).length > 0);
+      !validDimension(state.width) || !validDimension(state.height) ||
+      state.items.some(item => !validBox(item.bbox, state.width, state.height)) ||
+      (a.lock_layout && errorsFor(state).length > 0);
     runLabel.textContent = running ? "Agent 运行中…" : "运行 Agent"; spinner.hidden = !running;
-    run.setAttribute("aria-busy", String(running)); cancel.hidden = !running;
+    run.setAttribute("aria-busy", String(running)); cancel.hidden = !state.task;
     cancel.disabled = state.task?.cancelling === true;
     apiStatus.textContent = modelError || (!config ? "正在读取 API 配置…" : config.api_configured ? "API 已配置（来自 LPF_config.json）" : "请先在 LPF_config.json 配置 API 和模型");
     progress.textContent = message || (running ? "任务运行期间锁定编辑；完成后整体回填。" :
@@ -166,17 +175,42 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
     }
   }
   const runtimeLog = root.querySelector(".moss-runtime-log"), runtimeText = root.querySelector(".moss-runtime-log pre");
-  let logJob = null;
+  let logJob = null, logVisible = false, historyVersion = 0;
+  async function loadHistory() {
+    const editor = getState().editor_id, version = ++historyVersion;
+    try {
+      const history = await api(`/session?editor_id=${encodeURIComponent(editor)}`);
+      if (!disposed && version === historyVersion && editor === getState().editor_id) conversationText.textContent = history.messages.length ?
+        history.messages.map(m => `${m.role === "user" ? "你" : "Agent"}：${m.content}`).join("\n\n") : "尚无已完成的对话。";
+    } catch { if (!disposed && version === historyVersion) conversationText.textContent = "会话记录暂时无法读取，可稍后重新展开节点。"; }
+  }
+  async function acknowledge(jobId) {
+    try { await api(`/jobs/${encodeURIComponent(jobId)}/accept`, { method: "POST" }); await loadHistory(); }
+    catch { /* Next run also sends last_applied_job, recovering a lost acknowledgement. */ }
+  }
   function showLog(job = null) {
-    runtimeLog.hidden = !busy();
-    if (!busy()) return;
+    const running = Boolean(getState().task);
+    if (running !== logVisible) {
+      logVisible = running; runtimeLog.setAttribute("aria-busy", String(running));
+      reveal(runtimeLog, running, "log");
+    }
+    if (!running) return;
     const nextJob = getState().task.input_version;
     const follow = logJob !== nextJob || runtimeText.scrollHeight - runtimeText.clientHeight - runtimeText.scrollTop < 40;
+    if (logJob !== nextJob) runtimeText.replaceChildren();
     logJob = nextJob;
-    const text = job?.events?.map(e => `[${e.title || e.event || "运行状态"}]\n${e.summary || ""}`).join("\n\n") || "正在启动 Agent…\n模型返回的思考内容和工具调用会在这里实时更新。";
-    if (runtimeText.textContent !== text) { runtimeText.textContent = text; if (follow) runtimeText.scrollTop = runtimeText.scrollHeight; }
+    const rows = traceRows(job?.events);
+    if (!rows.length) rows.push({ title:"正在启动 Agent…", summary:"模型返回的思考内容和工具调用会在这里实时更新。" });
+    rows.forEach((row, index) => {
+      let entry = runtimeText.children[index];
+      if (!entry) { entry = document.createElement("span"); entry.className = "moss-log-entry"; runtimeText.append(entry); }
+      const text = `[${row.title}]\n${row.summary.trimEnd()}\n`;
+      if (entry.textContent !== text) entry.textContent = text;
+    });
+    while (runtimeText.children.length > rows.length) runtimeText.lastElementChild.remove();
+    if (follow) runtimeText.scrollTop = runtimeText.scrollHeight;
   }
-  function schedule() { clearTimeout(timer); if (!disposed && busy()) timer = setTimeout(poll, 350); }
+  function schedule() { clearTimeout(timer); if (!disposed && getState().task) timer = setTimeout(poll, 350); }
   async function accept(job) {
     const state = getState(), task = state.task;
     if (!task || job.editor_id !== state.editor_id || job.input_version !== task.input_version) return;
@@ -186,7 +220,10 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
         state.task = null; message = "任务已完成，当前内容已变化，保留现有编辑。";
       } else {
         try {
-          apply(job.result, job.job_id); notify = false; message = "Agent 结果已回填，可继续修订；开启工作流输出当前布局。";
+          apply(job.result, job.job_id);
+          update(s => { s.agent.request = ""; }, "task");
+          void acknowledge(job.job_id);
+          notify = false; message = "本轮已完成，可输入下一轮要求；开启工作流只编译当前布局。";
         } catch (error) {
           state.task = null; message = `结果无法回填：${error.message}。原布局已保留。`;
         }
@@ -202,7 +239,7 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
     if (notify) update(() => {}, "task"); render(); showLog(job); schedule();
   }
   async function poll() {
-    if (polling || disposed || !busy()) return;
+    if (polling || disposed || !getState().task) return;
     polling = true;
     try {
       const task = getState().task;
@@ -221,8 +258,8 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
     update(() => {}, "task"); message = "正在提交布局任务…"; render();
     showLog();
     const payload = { editor_id: state.editor_id, input_version: inputVersion, state: JSON.parse(JSON.stringify(state)),
-      mode: state.agent.mode, request: state.agent.request,
-      settings: { model: state.agent.model, effort: state.agent.effort, thinking: state.agent.thinking, web_search: state.agent.web_search, force_full_run:state.agent.force_full_run } };
+      mode: "conversation", lock_layout: state.agent.lock_layout, request: state.agent.request,
+      settings: { model: state.agent.model, effort: state.agent.effort, thinking: state.agent.thinking, web_search: state.agent.web_search } };
     try { const job = await api("/jobs", { method: "POST", body: JSON.stringify(payload) }); if (!disposed) await accept(job); }
     catch (error) {
       if (disposed) return;
@@ -238,13 +275,26 @@ export function createAgentPanel({ root, inspector, settingsHost, getState, upda
       await accept(await api(`/jobs/${encodeURIComponent(job.job_id)}`, { method: "DELETE" }));
     } catch { message = "取消请求未确认，正在重连…"; refresh(); schedule(); }
   };
+  reset.onclick = async () => {
+    if (busy()) return;
+    if (!confirm("清空画板内容、当前输入、提示词预览和 Agent 上下文？画布尺寸与模型设置会保留，清空后不能撤销。")) return;
+    resetting = true; message = "正在清空画板和上下文…"; refresh();
+    try {
+      await api("/reset", { method: "POST", body: JSON.stringify({ editor_id: getState().editor_id }) });
+      if (disposed) return;
+      resetting = false; historyVersion++; clear(); runtimeText.textContent = ""; logJob = null;
+      conversationText.textContent = "尚无已完成的对话。";
+      message = "画板和上下文已清空，可以开始新作品。";
+    } catch (error) { message = `清空未完成，当前画板已保留：${error.message}`; }
+    finally { resetting = false; if (!disposed) { render(); showLog(); } }
+  };
   async function load() {
     ensureIdentity(); update(() => {}, "task"); refresh(); showLog();
     try {
       config = await api("/config"); if (disposed) return;
       const state = getState();
       if (!state.agent.model && config.models.length && !busy()) { state.agent.model = config.models[0]; update(() => {}, "task"); }
-      modelError = ""; refresh(); schedule();
+      modelError = ""; refresh(); schedule(); void loadHistory();
     } catch (error) { modelError = `API 配置读取失败：${error.message}。请确认 ComfyUI 已重启加载新版本`; refresh(); schedule(); }
   }
   function dismissSettings(event) { if (!settings.contains(event.target)) setSettingsOpen(false); }

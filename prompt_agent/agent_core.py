@@ -35,6 +35,7 @@ from prompt_agent.cache import (
 )
 from prompt_agent.agent_trace import emit_agent_trace
 from prompt_agent.web_search import WEB_SEARCH_TOOL, execute_web_search
+from prompt_agent.search_images import create_with_search_images
 from prompt_agent import utils
 from prompt_agent.console import (
     _C, _log, _log_warn, _log_error, _log_ok, _log_section,
@@ -372,13 +373,11 @@ class PromptAgent:
         check_interrupted(self)
         if getattr(self, "_standalone", False):
             self._trace("request", status="running", title="模型思考中" if self.thinking else "请求模型", summary=purpose)
-        if getattr(self, "_standalone", False):
-            self._trace("request", status="running", title="模型思考中" if self.thinking else "请求模型", summary=purpose)
         if not getattr(self, "thinking", False):
-            return self.llm.chat.completions.create(**kwargs)
+            return create_with_search_images(self, **kwargs)
 
         try:
-            stream = self.llm.chat.completions.create(stream=True, **kwargs)
+            stream = create_with_search_images(self, stream=True, **kwargs)
         except Exception as stream_error:
             self._raise_if_interrupted(stream_error)
             log_path = write_agent_error_log(
@@ -394,7 +393,7 @@ class PromptAgent:
                 f"{format_agent_error_summary(stream_error)}{log_hint}"
             )
             check_interrupted(self)
-            response = self.llm.chat.completions.create(**kwargs)
+            response = create_with_search_images(self, **kwargs)
             self._log_non_stream_reasoning(response, purpose)
             return response
 
@@ -419,9 +418,14 @@ class PromptAgent:
                 f"{format_agent_error_summary(stream_error)}{log_hint}"
             )
             check_interrupted(self)
-            response = self.llm.chat.completions.create(**kwargs)
+            response = create_with_search_images(self, **kwargs)
             self._log_non_stream_reasoning(response, purpose)
             return response
+
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
 
     def _create_completion(self, *, purpose="LLM", **kwargs):
         """统一 LLM 调用入口：失败后按 1s/2s/4s 指数退避重试三次。"""
@@ -708,8 +712,8 @@ class PromptAgent:
         else:
             _log(f"  > 调用工具：{name}", _C.GREEN)
 
-    def _log_tool_result(self, name, result_str):
-        if getattr(self, "_standalone", False):
+    def _log_tool_result(self, name, result_str, *, emit_trace=True):
+        if emit_trace and getattr(self, "_standalone", False):
             self._trace("tool_result", title=name, summary=f"工具已返回 · {len(result_str)} 字符")
         if name in ("get_moss_image_format", "compile_moss_prompt", "convert_moss_bbox"):
             _log(f"    MOSS 工具返回 ({len(result_str)} chars)", _C.GREEN)
